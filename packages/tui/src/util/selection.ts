@@ -1,4 +1,6 @@
+import { isRenderable } from "@opentui/core"
 import type { ClipboardService } from "../context/clipboard"
+import type { TerminalSelection } from "../context/terminal"
 
 type Toast = {
   show: (input: { message: string; variant: "info" | "success" | "warning" | "error" }) => void
@@ -18,12 +20,18 @@ type Renderer = {
 
 type SelectionKeyEvent = {
   ctrl?: boolean
+  shift?: boolean
   name: string
   preventDefault: () => void
   stopPropagation: () => void
 }
 
-export function copy(renderer: Renderer, toast: Toast, clipboard: ClipboardService): boolean {
+export function copy(
+  renderer: Renderer,
+  toast: Toast,
+  clipboard: ClipboardService,
+  transform?: (selection: TerminalSelection) => string | undefined,
+): boolean {
   const selection = renderer.getSelection()
   if (!selection) return false
 
@@ -32,7 +40,8 @@ export function copy(renderer: Renderer, toast: Toast, clipboard: ClipboardServi
 
   const focus = renderer.currentFocusedRenderable
   const clipboardText =
-    focus?.getClipboardText && selection.selectedRenderables.includes(focus) ? focus.getClipboardText(text) : text
+    transform?.({ text, renderables: selection.selectedRenderables.filter(isRenderable) }) ??
+    (focus?.getClipboardText && selection.selectedRenderables.includes(focus) ? focus.getClipboardText(text) : text)
 
   clipboard
     ?.write?.(clipboardText)
@@ -48,12 +57,13 @@ export function handleSelectionKey(
   toast: Toast,
   event: SelectionKeyEvent,
   clipboard: ClipboardService,
+  transform?: (selection: TerminalSelection) => string | undefined,
 ) {
   const selection = renderer.getSelection()
   if (!selection) return
 
   if (event.ctrl && event.name === "c") {
-    if (!copy(renderer, toast, clipboard)) {
+    if (!copy(renderer, toast, clipboard, event.shift ? transform : undefined)) {
       renderer.clearSelection()
       return
     }

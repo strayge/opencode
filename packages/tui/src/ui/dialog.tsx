@@ -6,7 +6,7 @@ import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { useClipboard } from "../context/clipboard"
-import { useConfig } from "../config"
+import { explicitSelectionCopy, useOptionalTerminal } from "../context/terminal"
 
 export type DialogSize = "medium" | "large" | "xlarge"
 
@@ -199,8 +199,7 @@ export function DialogProvider(props: ParentProps) {
   const renderer = useRenderer()
   const toast = useToast()
   const clipboard = useClipboard()
-  const config = useConfig()
-  const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
+  const terminal = useOptionalTerminal()
 
   function copySelection() {
     const text = renderer.getSelection()?.getSelectedText()
@@ -220,14 +219,14 @@ export function DialogProvider(props: ParentProps) {
         position="absolute"
         zIndex={3000}
         onMouseDown={(evt: { button: number; preventDefault(): void; stopPropagation(): void }) => {
-          if (copyOnSelectEnabled()) return
+          if (!explicitSelectionCopy(terminal)) return
           if (evt.button !== MouseButton.RIGHT) return
 
           if (!copySelection()) return
           evt.preventDefault()
           evt.stopPropagation()
         }}
-        onMouseUp={copyOnSelectEnabled() ? copySelection : undefined}
+        onMouseUp={!explicitSelectionCopy(terminal) ? copySelection : undefined}
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size} centered={value.centered}>

@@ -3,6 +3,7 @@ import type { JSX } from "solid-js"
 import type { Attention, Context, Dialog, Page, Slot, SlotMap, Toast } from "@opencode-ai/plugin/tui/context"
 import { useRenderer } from "@opentui/solid"
 import { useClient } from "../context/client"
+import { useClipboard } from "../context/clipboard"
 import { useData } from "../context/data"
 import { Keymap } from "../context/keymap"
 import { useRoute } from "../context/route"
@@ -55,6 +56,7 @@ export function usePluginHost() {
     storage: useStorage(),
     sessionTabs: useSessionTabs(),
     terminal: useTerminal(),
+    clipboard: useClipboard(),
   }
 }
 
@@ -147,9 +149,23 @@ export function createPluginContext(input: {
         input.owned.push(async () => unregister())
         return unregister
       },
+      selection: host.terminal.selection,
       title: {
         decorate(decoration) {
           const unregister = host.terminal.title.decorate(decoration)
+          input.owned.push(async () => unregister())
+          return unregister
+        },
+      },
+    },
+    clipboard: {
+      async write(text) {
+        if (!host.clipboard.write) throw new Error("Clipboard is not available")
+        await host.clipboard.write(text)
+      },
+      selection: {
+        transform(options) {
+          const unregister = host.terminal.selectionCopy.transform(options)
           input.owned.push(async () => unregister())
           return unregister
         },

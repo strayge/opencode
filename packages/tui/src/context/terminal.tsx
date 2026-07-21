@@ -1,5 +1,7 @@
 import { createContext, createEffect, createSignal, onCleanup, onMount, useContext, type ParentProps } from "solid-js"
 import { useRenderer } from "@opentui/solid"
+import type { Renderable } from "@opentui/core"
+import { useConfig } from "../config"
 
 export type TerminalFocus = "unknown" | "focused" | "blurred"
 
@@ -12,10 +14,28 @@ export type TerminalTitleDecoration = {
   suffix?: () => string | undefined
 }
 
+export type TerminalSelection = {
+  text: string
+  renderables: Renderable[]
+}
+
+export type SelectionTransform = {
+  id: string
+  priority?: number
+  run: (selection: TerminalSelection) => string | undefined
+}
+
 type Value = {
   readonly focused: () => TerminalFocus
   readonly onFocus: (handler: () => void) => () => void
   readonly onBlur: (handler: () => void) => () => void
+  readonly selection: () => TerminalSelection | undefined
+  readonly selectionCopy: {
+    readonly transform: (input: SelectionTransform) => () => void
+    readonly apply: (selection: TerminalSelection) => string | undefined
+    readonly active: () => boolean
+    readonly copyOnSelect: () => boolean
+  }
   readonly title: {
     readonly decorate: (decoration: TerminalTitleDecoration) => () => void
   }
@@ -25,6 +45,11 @@ const TerminalContext = createContext<Value>()
 
 export function TerminalProvider(props: ParentProps) {
   const renderer = useRenderer()
+  const config = useConfig()
+
+  // Core's own copy-on-select default, resolved in one place so the fork's copy
+  // gestures and upstream's can never disagree about which one is active.
+  const copyOnSelect = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
 
   const [focus, setFocus] = createSignal<TerminalFocus>("unknown")
   const focusHandlers = new Set<() => void>()
@@ -109,6 +134,29 @@ export function TerminalProvider(props: ParentProps) {
     writeTitle(base ? compose(base) : base)
   })
 
+  const [selectionTransforms, setSelectionTransforms] = createSignal<SelectionTransform[]>([])
+  const transformSelection = (input: SelectionTransform) => {
+    setSelectionTransforms((list) => [...list.filter((item) => item.id !== input.id), input])
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      setSelectionTransforms((list) => list.filter((item) => item !== input))
+    }
+  }
+  const applySelectionTransform = (selection: TerminalSelection) => {
+    const sorted = selectionTransforms().toSorted((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    for (const item of sorted) {
+      try {
+        const result = item.run(selection)
+        if (result !== undefined) return result
+      } catch (error) {
+        console.debug("terminal selection transform failed", { id: item.id, error })
+      }
+    }
+    return undefined
+  }
+
   const value: Value = {
     focused: focus,
     onFocus(handler) {
@@ -118,6 +166,20 @@ export function TerminalProvider(props: ParentProps) {
     onBlur(handler) {
       blurHandlers.add(handler)
       return () => blurHandlers.delete(handler)
+    },
+    selection() {
+      const selection = renderer.getSelection()
+      if (!selection) return undefined
+      return {
+        text: selection.getSelectedText(),
+        renderables: selection.selectedRenderables,
+      }
+    },
+    selectionCopy: {
+      transform: transformSelection,
+      apply: applySelectionTransform,
+      active: () => selectionTransforms().length > 0,
+      copyOnSelect,
     },
     title: { decorate },
   }
@@ -135,3 +197,15 @@ export function useOptionalTerminal() {
   return useContext(TerminalContext)
 }
 
+/**
+ * Explicit selection copy is enabled when core's copy-on-select is off, or by
+ * any registered copy transform; shared by every copy-gesture call site.
+ *
+ * Without a provider (dialogs rendered in tests) there is no config to read, so
+ * this reports core's non-Windows default of copy-on-select rather than
+ * silently switching those renders to explicit copy.
+ */
+export function explicitSelectionCopy(terminal: ReturnType<typeof useOptionalTerminal>) {
+  if (!terminal) return false
+  return !terminal.selectionCopy.copyOnSelect() || terminal.selectionCopy.active()
+}

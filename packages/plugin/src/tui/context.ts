@@ -472,6 +472,11 @@ export interface TerminalTitleDecoration {
   readonly suffix?: () => string | undefined
 }
 
+export interface TerminalSelection {
+  readonly text: string
+  readonly renderables: Renderable[]
+}
+
 export interface Terminal {
   /** Reactive terminal focus state; stays unknown until the terminal reports focus events. */
   focused(): TerminalFocus
@@ -479,6 +484,8 @@ export interface Terminal {
   onFocus(handler: () => void): () => void
   /** Registers a blur listener. Cleanup is tied to the plugin scope. */
   onBlur(handler: () => void): () => void
+  /** Snapshot of the active mouse selection, if any. */
+  selection(): TerminalSelection | undefined
   readonly title: {
     /**
      * Contributes a reactive prefix/suffix around the application-owned base
@@ -486,6 +493,22 @@ export interface Terminal {
      * survive route and session changes. Cleanup is tied to the plugin scope.
      */
     decorate(decoration: TerminalTitleDecoration): () => void
+  }
+}
+
+export interface Clipboard {
+  write(text: string): Promise<void>
+  readonly selection: {
+    /**
+     * Transforms alternate selection copies (for example ctrl+shift+c). Return
+     * undefined to leave the selection to a lower-priority transform or the
+     * built-in rendered-text fallback. Cleanup is tied to the plugin scope.
+     */
+    transform(input: {
+      readonly id: string
+      readonly priority?: number
+      readonly run: (selection: TerminalSelection) => string | undefined
+    }): () => void
   }
 }
 
@@ -502,4 +525,5 @@ export interface Context {
   readonly storage: Storage
   readonly ui: UI
   readonly terminal: Terminal
+  readonly clipboard: Clipboard
 }

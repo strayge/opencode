@@ -45,7 +45,7 @@ import { DialogIntegration } from "./component/dialog-integration"
 import { ErrorComponent } from "./component/error-component"
 import { PluginRouteMissing } from "./component/plugin-route-missing"
 import { EditorContextProvider } from "./context/editor"
-import { TerminalProvider } from "./context/terminal"
+import { explicitSelectionCopy, TerminalProvider, useTerminal } from "./context/terminal"
 import { useEvent } from "./context/event"
 import { ClientProvider, useClient } from "./context/client"
 import { StartupLoading } from "./component/startup-loading"
@@ -479,6 +479,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   // with no registration the layout matches upstream.
   const appBottomHidden = createMemo(() => plugins.slot("app.bottom.hidden").length > 0)
   const clipboard = useClipboard()
+  const terminal = useTerminal()
 
   // Toast once when an MCP server enters a failed or needs-auth state so the user knows to act,
   // without having to open the status panel. Tracking the last alerted status avoids re-toasting
@@ -512,8 +513,8 @@ function App(props: { pair?: DialogPairCredentials }) {
   const offSelectionKeys = keymap.intercept(
     "key",
     ({ event }) => {
-      if (config.data.terminal?.copy_on_select ?? process.platform !== "win32") return
-      Selection.handleSelectionKey(renderer, toast, event, clipboard)
+      if (!explicitSelectionCopy(terminal)) return
+      Selection.handleSelectionKey(renderer, toast, event, clipboard, terminal.selectionCopy.apply)
     },
     { priority: 1 },
   )
@@ -533,7 +534,6 @@ function App(props: { pair?: DialogPairCredentials }) {
     renderer.clearSelection()
   }
   const terminalTitleEnabled = () => config.data.terminal?.title ?? true
-  const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
   const pasteSummaryEnabled = () => config.data.prompt?.paste !== "full"
   const tabsVertical = () => (config.data.tabs?.vertical ?? false) && sessionTabsFitVertically(dimensions().width)
   const tabsVisible = () =>
@@ -1223,14 +1223,15 @@ function App(props: { pair?: DialogPairCredentials }) {
       flexDirection="column"
       backgroundColor={theme.background.default}
       onMouseDown={(evt) => {
-        if (copyOnSelectEnabled()) return
+        if (!explicitSelectionCopy(terminal)) return
         if (evt.button !== MouseButton.RIGHT) return
 
-        if (!Selection.copy(renderer, toast, clipboard)) return
+        if (!Selection.copy(renderer, toast, clipboard, evt.modifiers.shift ? terminal.selectionCopy.apply : undefined))
+          return
         evt.preventDefault()
         evt.stopPropagation()
       }}
-      onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
+      onMouseUp={!explicitSelectionCopy(terminal) ? () => Selection.copy(renderer, toast, clipboard) : undefined}
     >
       <box flexGrow={1} minHeight={0} flexDirection="row">
         <Show when={tabsVisible() && tabsVertical()}>
