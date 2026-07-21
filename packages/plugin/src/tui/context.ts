@@ -214,6 +214,23 @@ export interface SlotMap {
     readonly sidebar?: boolean
     readonly theme: SlotTheme
   }
+  /**
+   * Replaces the built-in context/cost reading in the prompt footer. Core keeps
+   * the live-work status, the separators, and the empty-state behavior around it.
+   */
+  readonly "session.prompt.context": {
+    readonly sessionID?: string
+    readonly tokens?: number
+    readonly percent?: number
+    readonly text?: string
+    readonly cost?: string
+    /** Creation time of the assistant message supplying the displayed usage. */
+    readonly updatedAt?: number
+    readonly theme: {
+      readonly textSubdued: RGBA
+      readonly error: RGBA
+    }
+  }
   /** Presence-only gate; rendered content is ignored. */
   readonly "session.prompt.hidden": Readonly<Record<string, never>>
   readonly "session.prompt.right": {

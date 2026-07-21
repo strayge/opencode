@@ -8,7 +8,11 @@ import Notifications from "../feature-plugins/system/notifications"
 import Plugins from "../feature-plugins/system/plugins"
 import Storybook from "../feature-plugins/system/storybook"
 
-export const builtins = [
+// Deferred so the list does not dereference its imports while this module is
+// evaluating. A built-in that mounts a PluginSlot imports the plugin context,
+// which imports this module back; evaluating the array eagerly would then read
+// a still-uninitialized export whenever that built-in is the entry point.
+export const builtins = () => [
   HomeFooter,
   PromptFooter,
   SidebarContext,

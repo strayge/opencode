@@ -35,7 +35,9 @@ type Value = {
   readonly list: () => ReadonlyArray<State>
   readonly registered: () => ReadonlyArray<RegisteredPlugin>
   readonly route: (id: string, name: string) => Page["render"] | undefined
-  readonly slot: <Name extends SlotName>(name: Name) => ReadonlyArray<{ readonly id: string; readonly render: Slot<Name> }>
+  readonly slot: <Name extends SlotName>(
+    name: Name,
+  ) => ReadonlyArray<{ readonly id: string; readonly render: Slot<Name> }>
   readonly activate: (id: string) => Promise<boolean>
   readonly deactivate: (id: string) => Promise<boolean>
 }
@@ -193,7 +195,8 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver; d
     // Resolve: fold entries into one desired generation. A source that fails
     // to import keeps its running previous version and only reports failure.
     const desired = new Map<string, Desired>()
-    for (const plugin of builtins) desired.set(plugin.id, { plugin, source: "builtin", version: "builtin", enabled: true })
+    for (const plugin of builtins())
+      desired.set(plugin.id, { plugin, source: "builtin", version: "builtin", enabled: true })
     const failures: State[] = []
     for (const entry of entries) {
       const target = typeof entry === "string" ? entry : entry.package
@@ -256,7 +259,8 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver; d
     // generation is a no-op, so spurious watch events cost nothing.
     const currentIds = Object.keys(store.registrations)
     const desiredIds = [...desired.keys()]
-    const structural = currentIds.length !== desiredIds.length || currentIds.some((id, index) => desiredIds[index] !== id)
+    const structural =
+      currentIds.length !== desiredIds.length || currentIds.some((id, index) => desiredIds[index] !== id)
     if (structural) {
       await Promise.all(
         Object.entries(store.registrations)
@@ -342,7 +346,9 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver; d
     for (const state of states)
       if (
         state.status === "failed" &&
-        !store.states.some((prev) => prev.status === "failed" && prev.target === state.target && prev.error === state.error)
+        !store.states.some(
+          (prev) => prev.status === "failed" && prev.target === state.target && prev.error === state.error,
+        )
       )
         host.toast.show({ variant: "error", title: "Plugin", message: `${state.target}: ${state.error}` })
     setStore("states", reconcileStore(states))
@@ -390,7 +396,11 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver; d
         ready: () => store.ready,
         list: () => store.states,
         registered: () =>
-          Object.entries(store.registrations).map(([id, plugin]) => ({ id, source: plugin.source, active: plugin.active })),
+          Object.entries(store.registrations).map(([id, plugin]) => ({
+            id,
+            source: plugin.source,
+            active: plugin.active,
+          })),
         route: (id, name) => store.registrations[id]?.routes[name]?.render,
         slot: (name) =>
           Object.entries(store.registrations).flatMap(([id, registration]) => {
@@ -507,4 +517,13 @@ export function usePlugin() {
   const value = useContext(PluginContext)
   if (!value) throw new Error("PluginProvider is missing")
   return value
+}
+
+/**
+ * Reads the registry without requiring a provider, so a built-in feature plugin
+ * can ask whether a slot is registered while still rendering standalone in a
+ * test. With no provider nothing is registered, which is the upstream answer.
+ */
+export function useOptionalPlugin() {
+  return useContext(PluginContext)
 }

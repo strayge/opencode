@@ -105,6 +105,12 @@ export const Info = Schema.Struct({
       paste: Schema.optional(Schema.Literals(["compact", "full"])).annotate({
         description: "Display large pastes as compact placeholders or full text",
       }),
+      location: Schema.optional(Schema.Boolean).annotate({
+        description: "Show the session working directory under the prompt",
+      }),
+      palette: Schema.optional(Schema.Boolean).annotate({
+        description: "Show the command palette shortcut hint under the prompt",
+      }),
     }),
   ).annotate({ description: "Prompt input behavior" }),
   session: Schema.optional(

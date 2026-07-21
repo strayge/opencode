@@ -1373,13 +1373,11 @@ export function Prompt(props: PromptProps) {
       return `Ask anything... "${list()[store.placeholder % list().length]}"`
     })()
     if (!value) return undefined
-    const width =
-      dimensions().width < 44
-        ? dimensions().width - 5
-        : Math.min(75, dimensions().width - 4) - 5
+    const width = dimensions().width < 44 ? dimensions().width - 5 : Math.min(75, dimensions().width - 4) - 5
     return Locale.takeWidth(value, Math.max(1, width)).trimEnd()
   })
   const locationLabel = createMemo(() => {
+    if (config.prompt?.location === false) return
     if (!props.sessionID) {
       // No session yet: show where the next session will be created.
       const location = currentLocation.ref ?? data.location.default()

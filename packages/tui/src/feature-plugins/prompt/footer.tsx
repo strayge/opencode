@@ -1,5 +1,7 @@
 import { Plugin } from "@opencode-ai/plugin/tui"
 import { createMemo, Match, Show, Switch } from "solid-js"
+import { useConfigOptional } from "../../config"
+import { PluginSlot, useOptionalPlugin } from "../../plugin/context"
 import { contextUsage, formatContextUsage } from "../../util/session"
 import { useTerminalDimensions } from "@opentui/solid"
 
@@ -24,23 +26,63 @@ export function PromptFooter(props: { context: Plugin.Context; sessionID?: strin
       .filter((shell) => shell.metadata.sessionID === props.sessionID).length
     return count ? `${count} shell${count === 1 ? "" : "s"}` : undefined
   })
-  const status = createMemo(() => {
-    if (!props.sessionID) return []
+  const usage = createMemo(() => {
+    if (!props.sessionID) return
     const session = props.context.data.session.get(props.sessionID)
-    if (!session) return []
-    const usage = contextUsage(
+    if (!session) return
+    const context = contextUsage(
       props.context.data.session.message.list(props.sessionID),
       props.context.data.location.model.list(session.location),
       session.revert?.messageID,
     )
     const cost = props.context.data.session.cost(props.sessionID)
-    return [
-      usage ? formatContextUsage(usage.tokens, usage.percent) : undefined,
-      cost > 0 ? money.format(cost) : undefined,
-    ].filter((item): item is string => Boolean(item))
+    return {
+      info: context,
+      context: context ? formatContextUsage(context.tokens, context.percent) : undefined,
+      cost: cost > 0 ? money.format(cost) : undefined,
+    }
   })
+  const status = createMemo(() => [usage()?.context, usage()?.cost].filter((item): item is string => Boolean(item)))
   const live = createMemo(() => Boolean(subagents() || shells()))
   const shortcut = (id: string) => props.context.keymap.shortcuts(id)[0]
+
+  const plugins = useOptionalPlugin()
+  const config = useConfigOptional()
+  // Presence of a session.prompt.context registration hands the usage reading
+  // to a plugin. The gate reads the registry optionally so this component still
+  // renders without a PluginProvider, where nothing is ever registered.
+  const contextReplacement = createMemo(() => (plugins?.slot("session.prompt.context").length ?? 0) > 0)
+  // Stable object with reactive getters so slot views subscribe without being recreated.
+  const contextSlotInput = {
+    get sessionID() {
+      return props.sessionID
+    },
+    get tokens() {
+      return usage()?.info?.tokens
+    },
+    get percent() {
+      return usage()?.info?.percent
+    },
+    get text() {
+      return usage()?.context
+    },
+    // The replacement covers the joined context·cost reading, so the cost text
+    // is part of its input rather than something core keeps drawing beside it.
+    get cost() {
+      return usage()?.cost
+    },
+    get updatedAt() {
+      return usage()?.info?.updatedAt
+    },
+    theme: {
+      get textSubdued() {
+        return props.context.theme.text.subdued
+      },
+      get error() {
+        return props.context.theme.text.feedback.error.default
+      },
+    },
+  }
 
   return (
     <Switch>
@@ -55,7 +97,11 @@ export function PromptFooter(props: { context: Plugin.Context; sessionID?: strin
               <Show when={subagents() && shells()}> · </Show>
               <Show when={shells()}>{(value) => <span>{value()}</span>}</Show>
               <Show when={live() && status().length > 0}> · </Show>
-              <Show when={status().length > 0}>{status().join(" · ")}</Show>
+              <Show when={status().length > 0}>
+                <Show when={contextReplacement()} fallback={status().join(" · ")}>
+                  <PluginSlot name="session.prompt.context" input={contextSlotInput} mode="all" />
+                </Show>
+              </Show>
             </text>
           </Match>
           <Match when={dimensions().width >= 44}>
@@ -64,7 +110,7 @@ export function PromptFooter(props: { context: Plugin.Context; sessionID?: strin
             </text>
           </Match>
         </Switch>
-        <Show when={dimensions().width >= 44}>
+        <Show when={dimensions().width >= 44 && config?.data.prompt?.palette !== false}>
           <text fg={props.context.theme.text.default} flexShrink={0}>
             {shortcut("command.palette.show")} <span style={{ fg: props.context.theme.text.subdued }}>commands</span>
           </text>
