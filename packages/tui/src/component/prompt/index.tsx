@@ -67,6 +67,13 @@ export type PromptProps = {
     normal?: string[]
     shell?: string[]
   }
+  /**
+   * Whether the route currently shows its sidebar. Only reaches the
+   * `session.prompt.footer.trailing` slot input, so a plugin can render a
+   * stateful control for a panel the Prompt itself knows nothing about.
+   * Undefined on routes without a sidebar (the home route).
+   */
+  sidebar?: boolean
 }
 
 function pastedFilepath(value: string, platform: string) {
@@ -274,7 +281,6 @@ export function Prompt(props: PromptProps) {
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
-
   event.on("tui.prompt.append", (evt, { workspace }) => {
     if (workspace !== (currentLocation.current?.workspaceID ?? data.location.default().workspaceID)) return
     if (!input || input.isDestroyed) return
@@ -307,6 +313,53 @@ export function Prompt(props: PromptProps) {
     extmarkToPart: new Map(),
     interrupt: 0,
   })
+
+  // Stable object with reactive getters so slot views subscribe without being recreated.
+  const footerSlotInput = {
+    get sessionID() {
+      return props.sessionID
+    },
+    get status() {
+      return status()
+    },
+    get mode() {
+      return store.mode
+    },
+  }
+  // The trailing footer slot sits past every built-in hint, so its content is
+  // the row's last cell and can act as a control rather than a status readout.
+  // Same fields as the leading slot plus the route's sidebar state and theme
+  // tokens, which a control needs to render an on/off appearance in theme.
+  const footerTrailingSlotInput = {
+    get sessionID() {
+      return props.sessionID
+    },
+    get status() {
+      return status()
+    },
+    get mode() {
+      return store.mode
+    },
+    get sidebar() {
+      return props.sidebar
+    },
+    theme: {
+      get text() {
+        return theme.text.default
+      },
+      get textSubdued() {
+        return theme.text.subdued
+      },
+      get accent() {
+        return theme.hue.accent[500]
+      },
+    },
+  }
+  const rightSlotInput = {
+    get sessionID() {
+      return props.sessionID
+    },
+  }
 
   createEffect(
     on(
@@ -1519,6 +1572,7 @@ export function Prompt(props: PromptProps) {
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
                   {props.right}
+                  <PluginSlot name="session.prompt.right" input={rightSlotInput} mode="all" />
                 </box>
               </Show>
             </box>
@@ -1551,6 +1605,7 @@ export function Prompt(props: PromptProps) {
           />
         </box>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
+          <PluginSlot name="session.prompt.footer.leading" input={footerSlotInput} mode="all" />
           <box flexGrow={1} flexShrink={1} minWidth={0}>
             <Switch>
               <Match when={status() === "running"}>
@@ -1622,6 +1677,7 @@ export function Prompt(props: PromptProps) {
             input={{ sessionID: props.sessionID, mode: store.mode }}
             mode="replace"
           />
+          <PluginSlot name="session.prompt.footer.trailing" input={footerTrailingSlotInput} mode="all" />
         </box>
       </box>
       <Autocomplete

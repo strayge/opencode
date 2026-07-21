@@ -79,6 +79,8 @@ import { nextThinkingMode, reasoningSummary, type ThinkingMode } from "../../con
 import { getScrollAcceleration } from "../../util/scroll"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
+import { PluginSlot, usePlugin } from "../../plugin/context"
+import { assistantFooterSlotInput } from "../../plugin/slot-inputs"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"
 import { PluginSlot } from "../../plugin/render"
@@ -179,6 +181,19 @@ export function Session() {
     tab: undefined as string | undefined,
   })
   const disabled = createMemo(() => promptedPermissions().length > 0 || forms().length > 0)
+  const plugins = usePlugin()
+  // Registering into session.sidebar.child
+  // (rendered by the Sidebar in child sessions only) makes child sessions
+  // follow the same visibility rules as roots; with no registration they hide
+  // the sidebar as upstream does.
+  const childSidebar = createMemo(() => plugins.slot("session.sidebar.child").length > 0)
+  // Focus (read-only) mode: while a plugin registers into session.prompt.hidden
+  // the entire input cluster is unmounted so the transcript owns the screen.
+  // Presence-only gate (same pattern as steering/childSidebar) — the slot
+  // renders nothing; a plugin toggles it by registering/unregistering. With no
+  // registration the layout matches upstream. Required-input surfaces
+  // (permission/form prompts) still show while hidden.
+  const promptHidden = createMemo(() => plugins.slot("session.prompt.hidden").length > 0)
 
   const pending = createMemo(() => {
     const completed = messages().findLast((x) => x.type === "assistant" && x.time.completed)?.id
@@ -209,11 +224,30 @@ export function Session() {
   )
   const wide = createMemo(() => availableWidth() > 120)
   const sidebarVisible = createMemo(() => {
-    if (session()?.parentID) return false
+    // A manual toggle wins in any session — including a child — so show/hide
+    // stays usable in subagent views. The child gate below only suppresses the
+    // auto-open *default*, not the toggle.
     if (sidebarOpen()) return true
+    // Child sessions don't auto-open the sidebar unless a plugin registers the
+    // child sidebar slot; without it the default is hidden (upstream behaviour),
+    // but a manual show (above) still works.
+    if (session()?.parentID && !childSidebar()) return false
     if (sidebar() === "auto" && wide()) return true
     return false
   })
+  // Absolute show/hide of the sidebar: persists the config default and syncs the
+  // manual-open signal together, so the two never disagree. Shared by the
+  // session.sidebar.toggle command and the focus-mode collapse effect.
+  const setSidebar = (visible: boolean) => {
+    batch(() => {
+      void configState
+        .update((draft) => {
+          draft.session = { ...draft.session, sidebar: visible ? "auto" : "hide" }
+        })
+        .catch(toast.error)
+      setSidebarOpen(visible)
+    })
+  }
   const contentWidth = createMemo(() => availableWidth() - (sidebarVisible() ? 42 : 0) - 4)
   const models = createMemo(() => data.location.model.list(location()) ?? [])
 
@@ -371,7 +405,9 @@ export function Session() {
     toast.show({ message: `${feature} is not implemented for V2 sessions yet`, variant: "error", duration: 5000 })
     dialog.clear()
   }
-
+  // Arrow-bound session navigation must not steal keys from an editor the
+  // user is typing in; commands guarded by this fall through to cursor
+  // movement (matching the empty-boundary fallthrough of prompt history).
   const alignMessage = (messageID: string, top: number) => {
     scroll.stickyScroll = false
     setNavigationMessage(messageID)
@@ -633,15 +669,7 @@ export function Session() {
       id: "session.sidebar.toggle",
       group: "Session",
       run: () => {
-        batch(() => {
-          const isVisible = sidebarVisible()
-          void configState
-            .update((draft) => {
-              draft.session = { ...draft.session, sidebar: isVisible ? "hide" : "auto" }
-            })
-            .catch(toast.error)
-          setSidebarOpen(!isVisible)
-        })
+        setSidebar(!sidebarVisible())
         dialog.clear()
       },
     },
@@ -923,6 +951,16 @@ export function Session() {
     bindings: [...baseAndUnfocusedCommands, ...baseCommands()].map((command) => command.id),
   }))
 
+  // Entering focus mode collapses the sidebar if it is showing; leaving focus
+  // mode deliberately never reopens it (the asymmetry is the feature). Acting
+  // only on the false→true transition keeps "do not restore on show" automatic.
+  createEffect(
+    on(promptHidden, (hidden, previous) => {
+      if (!hidden || previous || !sidebarVisible()) return
+      setSidebar(false)
+    }),
+  )
+
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
   createEffect(
@@ -955,7 +993,7 @@ export function Session() {
         <box
           flexGrow={1}
           minHeight={0}
-          paddingBottom={1}
+          paddingBottom={promptHidden() ? 0 : 1}
           paddingLeft={dimensions().width < 44 ? 1 : 2}
           paddingRight={dimensions().width < 44 ? 1 : 2}
           gap={1}
@@ -1003,47 +1041,61 @@ export function Session() {
                 {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
               </Show>
             </scrollbox>
-            <box flexShrink={0}>
-              <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} mode="all" />
-              <Composer
-                sessionID={route.sessionID}
-                open={composer.open || (!!session()?.parentID && forms().length === 0)}
-                defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
-                onClose={() => setComposer("open", false)}
-              />
-              <Switch>
-                <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
-                <Match when={promptedPermissions().length > 0}>
-                  <Show when={promptedPermissions()[0]?.id} keyed>
-                    {(_) => {
-                      const request = promptedPermissions()[0]
-                      return request ? (
-                        <PermissionPrompt request={request} directory={session()?.location.directory} />
-                      ) : null
-                    }}
-                  </Show>
-                </Match>
-                <Match when={forms().length > 0}>
-                  <Show when={forms()[0]?.id} keyed>
-                    {(_) => {
-                      const form = forms()[0]
-                      return form ? <FormPrompt form={form} /> : null
-                    }}
-                  </Show>
-                </Match>
-                <Match when={!disabled()}>
-                  <Prompt
-                    visible={true}
-                    ref={bind}
-                    disabled={false}
-                    onSubmit={() => {
-                      toBottom()
-                    }}
+            {/* Focus mode unmounts the whole input-cluster wrapper (not just its
+                contents): an empty box would still be a flex child, so the
+                parent's gap={1} would leave a blank row above the paddingBottom
+                one. Dropping the box removes that gap so exactly one blank row
+                (the paddingBottom) sits below the transcript. The wrapper stays
+                mounted while a permission/form prompt is pending (disabled()), so
+                required input still shows. */}
+            <Show when={!promptHidden() || disabled()}>
+              <box flexShrink={0}>
+                <Show when={!promptHidden()}>
+                  <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} mode="all" />
+                  <Composer
                     sessionID={route.sessionID}
+                    open={composer.open || (!!session()?.parentID && forms().length === 0)}
+                    defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
+                    onClose={() => setComposer("open", false)}
                   />
-                </Match>
-              </Switch>
-            </box>
+                </Show>
+                <Switch>
+                  <Match when={!promptHidden() && (composer.open || (!!session()?.parentID && forms().length === 0))}>
+                    {null}
+                  </Match>
+                  <Match when={promptedPermissions().length > 0}>
+                    <Show when={promptedPermissions()[0]?.id} keyed>
+                      {(_) => {
+                        const request = promptedPermissions()[0]
+                        return request ? (
+                          <PermissionPrompt request={request} directory={session()?.location.directory} />
+                        ) : null
+                      }}
+                    </Show>
+                  </Match>
+                  <Match when={forms().length > 0}>
+                    <Show when={forms()[0]?.id} keyed>
+                      {(_) => {
+                        const form = forms()[0]
+                        return form ? <FormPrompt form={form} /> : null
+                      }}
+                    </Show>
+                  </Match>
+                  <Match when={!promptHidden() && !disabled()}>
+                    <Prompt
+                      visible={true}
+                      ref={bind}
+                      disabled={false}
+                      onSubmit={() => {
+                        toBottom()
+                      }}
+                      sessionID={route.sessionID}
+                      sidebar={sidebarVisible()}
+                    />
+                  </Match>
+                </Switch>
+              </box>
+            </Show>
           </Show>
         </box>
         <Show when={sidebarVisible()}>
@@ -1118,11 +1170,7 @@ function SessionRowView(props: SessionRowViewProps) {
         </Match>
         <Match when={props.row.type === "turn-usage" ? props.row : undefined}>
           {(row) => (
-            <TurnTokenUsage
-              messageIDs={row().messageIDs}
-              previousCache={row().previousCache}
-              message={props.message}
-            />
+            <TurnTokenUsage messageIDs={row().messageIDs} previousCache={row().previousCache} message={props.message} />
           )}
         </Match>
       </Switch>
@@ -1229,21 +1277,10 @@ function TurnTokenToolCalls(props: { tools: SessionMessageAssistantTool[] }) {
         <For each={props.tools}>
           {(tool) => (
             <box flexDirection="row">
-              <text
-                width={nameWidth()}
-                flexShrink={0}
-                fg={theme.text.subdued}
-                attributes={TextAttributes.BOLD}
-              >
+              <text width={nameWidth()} flexShrink={0} fg={theme.text.subdued} attributes={TextAttributes.BOLD}>
                 {tool.name}
               </text>
-              <text
-                fg={theme.text.subdued}
-                attributes={TextAttributes.DIM}
-                wrapMode="word"
-                flexGrow={1}
-                minWidth={0}
-              >
+              <text fg={theme.text.subdued} attributes={TextAttributes.DIM} wrapMode="word" flexGrow={1} minWidth={0}>
                 {turnTokenToolSummary(tool)}
               </text>
             </box>
@@ -1260,9 +1297,7 @@ function turnTokenToolSummary(tool: SessionMessageAssistantTool) {
   const primaryKey = ["command", "id", "pattern", "url", "query", "path", "description", "code"].find(
     (key) => key in data,
   )
-  const input = Object.entries(data).filter(([, value]) =>
-    ["string", "number", "boolean"].includes(typeof value),
-  )
+  const input = Object.entries(data).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
   const primary = input.find(([key]) => key === primaryKey)?.[1]
   const details = input.filter(([key]) => key !== primaryKey).map(([key, value]) => `${key}: ${String(value)}`)
   return [primary === undefined ? "" : String(primary), ...details].filter(Boolean).join("  ")
@@ -1571,7 +1606,7 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
         </box>
       </Show>
       <AssistantRetry retry={props.message.retry} />
-      <box paddingLeft={3} marginTop={props.message.error && !interrupted() ? 1 : 0}>
+      <box paddingLeft={3} marginTop={props.message.error && !interrupted() ? 1 : 0} flexDirection="row" gap={1}>
         <text>
           <span style={{ fg: props.message.error ? theme.text.subdued : local.agent.color(props.message.agent) }}>
             {Locale.titlecase(props.message.agent)}
@@ -1586,6 +1621,14 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
             <span style={{ fg: theme.text.subdued }}> · interrupted</span>
           </Show>
         </text>
+        <PluginSlot
+          name="session.message.assistant.footer"
+          input={assistantFooterSlotInput(
+            () => ctx.sessionID,
+            () => props.message,
+          )}
+          mode="all"
+        />
       </box>
     </>
   )
@@ -1670,8 +1713,7 @@ function CompactionMessage(props: { message: Extract<SessionMessageInfo, { type:
   const text = () =>
     props.message.status === "failed" ? (cancelled() ? "" : props.message.error.message) : props.message.summary
   const content = createMemo(() => text().trim())
-  const color = () =>
-    status() === "failed" && !cancelled() ? theme.text.feedback.error.default : theme.text.subdued
+  const color = () => (status() === "failed" && !cancelled() ? theme.text.feedback.error.default : theme.text.subdued)
   return (
     <box>
       <box flexDirection="row" alignItems="center">
@@ -2201,10 +2243,7 @@ function GenericTool(props: ToolProps) {
             {(value) => (
               <box gap={1}>
                 <text>
-                  <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}>
-                    {" "}
-                    Output{" "}
-                  </span>
+                  <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}> Output </span>
                 </text>
                 <box paddingLeft={1}>
                   <text fg={theme.text.default} wrapMode="word">
@@ -2456,9 +2495,7 @@ function BlockToolContent(props: BlockToolProps & { borderColor: RGBA }) {
               <Show
                 when={props.spinner}
                 fallback={
-                  <text fg={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>
-                    {title()}
-                  </text>
+                  <text fg={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>{title()}</text>
                 }
               >
                 <Spinner color={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>

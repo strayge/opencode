@@ -1,6 +1,6 @@
 import { PluginContextProvider } from "@opencode-ai/plugin/tui"
 import type { JSX } from "solid-js"
-import type { Context, Dialog, Page, Slot, SlotMap, Toast } from "@opencode-ai/plugin/tui/context"
+import type { Attention, Context, Dialog, Page, Slot, SlotMap, Toast } from "@opencode-ai/plugin/tui/context"
 import { useRenderer } from "@opentui/solid"
 import { useClient } from "../context/client"
 import { useData } from "../context/data"
@@ -18,6 +18,7 @@ import { useToast } from "../ui/toast"
 import { useAttention } from "../context/attention"
 import { useStorage } from "../context/storage"
 import { useSessionTabs } from "../context/session-tabs"
+import { useTerminal } from "../context/terminal"
 import { abbreviateHome } from "../util/path-format"
 
 export type Dispose = () => Promise<void>
@@ -53,6 +54,7 @@ export function usePluginHost() {
     attention: useAttention(),
     storage: useStorage(),
     sessionTabs: useSessionTabs(),
+    terminal: useTerminal(),
   }
 }
 
@@ -81,6 +83,21 @@ export function createPluginContext(input: {
   }
   // Unregistering after deactivation is a no-op: deactivate already resets
   // the registration's routes and slots wholesale.
+  // Wraps the host attention rather than passing it through so a registered
+  // sound pack is unregistered when the owning plugin unloads.
+  const attentionApi: Attention = {
+    notify: (options) => host.attention.notify(options),
+    soundboard: {
+      registerPack(pack) {
+        const unregister = host.attention.soundboard.registerPack(pack)
+        input.owned.push(async () => unregister())
+        return unregister
+      },
+      activate: (id, options) => host.attention.soundboard.activate(id, options),
+      current: () => host.attention.soundboard.current(),
+      list: () => host.attention.soundboard.list(),
+    },
+  }
   const registration = (kind: "routes" | "slots", name: string) => {
     let registered = true
     const unregister = () => {
@@ -101,7 +118,7 @@ export function createPluginContext(input: {
     renderer: host.renderer,
     client: host.client.api,
     data: host.data,
-    attention: host.attention,
+    attention: attentionApi,
     get theme() {
       return host.themes.currentTokens()
     },
@@ -117,6 +134,26 @@ export function createPluginContext(input: {
     storage: {
       store: (key, options) => host.storage.store(`plugin.${input.id}.${key}`, options),
       memory: (key, options) => host.storage.memory(`plugin.${input.id}.${key}`, options),
+    },
+    terminal: {
+      focused: host.terminal.focused,
+      onFocus(handler) {
+        const unregister = host.terminal.onFocus(handler)
+        input.owned.push(async () => unregister())
+        return unregister
+      },
+      onBlur(handler) {
+        const unregister = host.terminal.onBlur(handler)
+        input.owned.push(async () => unregister())
+        return unregister
+      },
+      title: {
+        decorate(decoration) {
+          const unregister = host.terminal.title.decorate(decoration)
+          input.owned.push(async () => unregister())
+          return unregister
+        },
+      },
     },
     ui: {
       dialog: dialogApi,

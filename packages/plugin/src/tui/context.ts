@@ -15,6 +15,7 @@ import type {
   ProviderInfo,
   ReferenceInfo,
   SessionInfo,
+  SessionMessageAssistant,
   SessionMessageInfo,
   SessionPendingInfo,
   ShellInfo,
@@ -22,9 +23,10 @@ import type {
   VcsInfo,
 } from "@opencode-ai/client"
 import type { ResolvedTheme } from "@opencode-ai/theme/tui"
-import type { CliRenderer, KeyEvent, Renderable } from "@opentui/core"
+import type { CliRenderer, KeyEvent, Renderable, RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 import type { Store } from "solid-js/store"
+import type { TuiAttentionSoundboard } from "../v1/tui.js"
 
 export interface Storage {
   /**
@@ -150,8 +152,27 @@ export interface Page {
   readonly render: (input: { readonly data?: Record<string, any> }) => JSX.Element
 }
 
+/**
+ * Theme tokens handed to a slot so a contribution can match the surface it
+ * renders on. Plugins have no theme access of their own, and the tokens differ
+ * per mount point (the sidebar's are its elevated set, the Prompt's its own),
+ * so each slot carries the ones its host resolved.
+ */
+export interface SlotTheme {
+  readonly text: RGBA
+  readonly textSubdued: RGBA
+  readonly accent: RGBA
+}
+
 export interface SlotMap {
   readonly app: Readonly<Record<string, never>>
+  /**
+   * Full-width row below every route. Presence of the `app.bottom.hidden`
+   * registration suppresses it.
+   */
+  readonly "app.bottom": Readonly<Record<string, never>>
+  /** Presence-only gate; rendered content is ignored. */
+  readonly "app.bottom.hidden": Readonly<Record<string, never>>
   readonly "home.footer": Readonly<Record<string, never>>
   readonly "prompt.footer.end": {
     readonly sessionID?: string
@@ -164,6 +185,44 @@ export interface SlotMap {
     readonly sessionID: string
   }
   readonly "sidebar.footer": Readonly<Record<string, never>>
+  readonly "sidebar.footer.leading": {
+    readonly sessionID: string
+    readonly theme: SlotTheme
+  }
+  readonly "session.message.assistant.footer": {
+    readonly sessionID: string
+    readonly messageID: string
+    readonly agent: string
+    readonly providerID: string
+    readonly modelID: string
+    readonly variant?: string
+    readonly tokens?: SessionMessageAssistant["tokens"]
+    readonly cost?: number
+    readonly completed: boolean
+    readonly duration?: number
+  }
+  readonly "session.prompt.footer.leading": {
+    readonly sessionID?: string
+    readonly status: "idle" | "running"
+    readonly mode: "normal" | "shell"
+  }
+  readonly "session.prompt.footer.trailing": {
+    readonly sessionID?: string
+    readonly status: "idle" | "running"
+    readonly mode: "normal" | "shell"
+    /** Undefined on routes that have no sidebar, which is how a plugin tells "hidden" from "absent". */
+    readonly sidebar?: boolean
+    readonly theme: SlotTheme
+  }
+  /** Presence-only gate; rendered content is ignored. */
+  readonly "session.prompt.hidden": Readonly<Record<string, never>>
+  readonly "session.prompt.right": {
+    readonly sessionID?: string
+  }
+  /** Presence also opts a child session's sidebar into the auto-open default. */
+  readonly "session.sidebar.child": {
+    readonly sessionID: string
+  }
 }
 
 export type SlotName = keyof SlotMap
@@ -228,6 +287,11 @@ export interface AttentionNotifyResult {
 
 export interface Attention {
   notify(options: AttentionNotifyOptions): Promise<AttentionNotifyResult>
+  /**
+   * Sound-pack registry behind the notification sounds. Registration is scoped
+   * to the calling plugin, so a pack disappears when its plugin unloads.
+   */
+  readonly soundboard: TuiAttentionSoundboard
 }
 
 export type DialogSize = "medium" | "large" | "xlarge"
@@ -397,6 +461,34 @@ export interface UI {
   readonly slot: <Name extends SlotName>(name: Name, render: Slot<Name>) => () => void
 }
 
+export type TerminalFocus = "unknown" | "focused" | "blurred"
+
+export interface TerminalTitleDecoration {
+  /** Stable identifier; registering the same ID replaces the previous decoration. */
+  readonly id: string
+  /** Higher priority renders closer to the outside of the title. Defaults to 0. */
+  readonly priority?: number
+  readonly prefix?: () => string | undefined
+  readonly suffix?: () => string | undefined
+}
+
+export interface Terminal {
+  /** Reactive terminal focus state; stays unknown until the terminal reports focus events. */
+  focused(): TerminalFocus
+  /** Registers a focus listener. Cleanup is tied to the plugin scope. */
+  onFocus(handler: () => void): () => void
+  /** Registers a blur listener. Cleanup is tied to the plugin scope. */
+  onBlur(handler: () => void): () => void
+  readonly title: {
+    /**
+     * Contributes a reactive prefix/suffix around the application-owned base
+     * title. The application keeps writing the base title, so decorations
+     * survive route and session changes. Cleanup is tied to the plugin scope.
+     */
+    decorate(decoration: TerminalTitleDecoration): () => void
+  }
+}
+
 export interface Context {
   readonly options: Readonly<Record<string, any>>
   readonly location: LocationRef | undefined
@@ -409,4 +501,5 @@ export interface Context {
   readonly keymap: Keymap
   readonly storage: Storage
   readonly ui: UI
+  readonly terminal: Terminal
 }

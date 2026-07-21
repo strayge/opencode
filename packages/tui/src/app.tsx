@@ -45,6 +45,7 @@ import { DialogIntegration } from "./component/dialog-integration"
 import { ErrorComponent } from "./component/error-component"
 import { PluginRouteMissing } from "./component/plugin-route-missing"
 import { EditorContextProvider } from "./context/editor"
+import { TerminalProvider } from "./context/terminal"
 import { useEvent } from "./context/event"
 import { ClientProvider, useClient } from "./context/client"
 import { StartupLoading } from "./component/startup-loading"
@@ -215,9 +216,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
     Effect.catch(() => Effect.tryPromise(() => api.location.get())),
   )
   const directory = location.directory
-  const pluginDirectories = yield* Effect.promise(() =>
-    tuiPluginDirectories(process.cwd(), global.config),
-  )
+  const pluginDirectories = yield* Effect.promise(() => tuiPluginDirectories(process.cwd(), global.config))
   const handoff = input.terminalHandoff ? yield* Effect.promise(input.terminalHandoff) : undefined
   const managed = input.server.service
   const service = managed
@@ -384,21 +383,23 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                                   <PromptRefProvider>
                                                                     <EditorContextProvider>
                                                                       <AttentionProvider>
-                                                                        <PluginProvider
-                                                                          packages={input.packages}
-                                                                          directories={pluginDirectories}
-                                                                        >
-                                                                          <App
-                                                                            pair={
-                                                                              input.server.endpoint.auth
-                                                                                ? input.server.endpoint.auth
-                                                                                : {
-                                                                                    username: "opencode",
-                                                                                    password: "",
-                                                                                  }
-                                                                            }
-                                                                          />
-                                                                        </PluginProvider>
+                                                                        <TerminalProvider>
+                                                                          <PluginProvider
+                                                                            packages={input.packages}
+                                                                            directories={pluginDirectories}
+                                                                          >
+                                                                            <App
+                                                                              pair={
+                                                                                input.server.endpoint.auth
+                                                                                  ? input.server.endpoint.auth
+                                                                                  : {
+                                                                                      username: "opencode",
+                                                                                      password: "",
+                                                                                    }
+                                                                              }
+                                                                            />
+                                                                          </PluginProvider>
+                                                                        </TerminalProvider>
                                                                       </AttentionProvider>
                                                                     </EditorContextProvider>
                                                                   </PromptRefProvider>
@@ -471,6 +472,12 @@ function App(props: { pair?: DialogPairCredentials }) {
   const exit = useExit()
   const promptRef = usePromptRef()
   const plugins = usePlugin()
+  // Presence-only gate (same pattern as session.prompt.hidden): while any plugin
+  // registers into app.bottom.hidden the app.bottom slot region is unmounted, so
+  // a "focus"/read-only view can reclaim the bottom status area (e.g. the
+  // provider-usage bars) along with the input cluster. The slot renders nothing;
+  // with no registration the layout matches upstream.
+  const appBottomHidden = createMemo(() => plugins.slot("app.bottom.hidden").length > 0)
   const clipboard = useClipboard()
 
   // Toast once when an MCP server enters a failed or needs-auth state so the user knows to act,
@@ -1253,6 +1260,11 @@ function App(props: { pair?: DialogPairCredentials }) {
                 </Match>
               </Switch>
             </box>
+            <Show when={!appBottomHidden()}>
+              <box flexShrink={0}>
+                <PluginSlot name="app.bottom" input={{}} mode="all" />
+              </box>
+            </Show>
             <PluginSlot name="app" input={{}} mode="all" />
           </Show>
         </box>
