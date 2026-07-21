@@ -1,6 +1,7 @@
 import { isRenderable } from "@opentui/core"
 import type { ClipboardService } from "../context/clipboard"
 import type { TerminalSelection } from "../context/terminal"
+import { selectedText } from "./selection-text"
 
 type Toast = {
   show: (input: { message: string; variant: "info" | "success" | "warning" | "error" }) => void
@@ -35,7 +36,7 @@ export function copy(
   const selection = renderer.getSelection()
   if (!selection) return false
 
-  const text = selection.getSelectedText()
+  const text = selectedText(selection)
   if (!text) return false
 
   const focus = renderer.currentFocusedRenderable
