@@ -181,8 +181,20 @@ export function Session() {
     tab: undefined as string | undefined,
   })
   const disabled = createMemo(() => promptedPermissions().length > 0 || forms().length > 0)
+  // Registering into the session.prompt.below slot (mounted under the Prompt)
+  // opts child sessions into prompt-steering mode: the Composer is no longer
+  // forced open and the Prompt renders instead (with the slot content under
+  // it). With no registration the child-session layout matches upstream.
   const plugins = usePlugin()
-  // Registering into session.sidebar.child
+  const steering = createMemo(() => plugins.slot("session.prompt.below").length > 0)
+  // A subagent that has finished (idle child session) can no longer be steered,
+  // so the input is hidden entirely — the session.prompt.below slot (the subagent
+  // switcher) is rendered on its own instead of inside the Prompt, so only it
+  // shows (no text input, no status line).
+  const steeringFinished = createMemo(
+    () => steering() && !!session()?.parentID && data.session.status(route.sessionID) === "idle",
+  )
+  // Same opt-in pattern for the sidebar: registering into session.sidebar.child
   // (rendered by the Sidebar in child sessions only) makes child sessions
   // follow the same visibility rules as roots; with no registration they hide
   // the sidebar as upstream does.
@@ -194,6 +206,42 @@ export function Session() {
   // registration the layout matches upstream. Required-input surfaces
   // (permission/form prompts) still show while hidden.
   const promptHidden = createMemo(() => plugins.slot("session.prompt.hidden").length > 0)
+  // Stable object with reactive getters so slot views subscribe without being recreated.
+  // The theme tokens let a prompt-adjacent plugin frame itself as part of the
+  // input cluster (the Prompt's left border + elevated background) rather than
+  // reading as more transcript output — plugins have no theme access of their own.
+  // Used by the standalone session.prompt.below mount (finished subagent).
+  const promptSlotInput = {
+    get sessionID() {
+      return route.sessionID
+    },
+    theme: {
+      get border() {
+        return theme.border.default
+      },
+      get divider() {
+        return theme.border.default
+      },
+      get background() {
+        return theme.raise(theme.background.surface.offset)
+      },
+      get text() {
+        return theme.text.default
+      },
+      get textSubdued() {
+        return theme.text.subdued
+      },
+      get accent() {
+        return theme.hue.accent[500]
+      },
+      get success() {
+        return theme.text.feedback.success.default
+      },
+      get error() {
+        return theme.text.feedback.error.default
+      },
+    },
+  }
 
   const pending = createMemo(() => {
     const completed = messages().findLast((x) => x.type === "assistant" && x.time.completed)?.id
@@ -408,6 +456,11 @@ export function Session() {
   // Arrow-bound session navigation must not steal keys from an editor the
   // user is typing in; commands guarded by this fall through to cursor
   // movement (matching the empty-boundary fallthrough of prompt history).
+  const editorHasText = () => {
+    const editor = renderer.currentFocusedEditor
+    return !!editor && editor.plainText !== ""
+  }
+
   const alignMessage = (messageID: string, top: number) => {
     scroll.stickyScroll = false
     setNavigationMessage(messageID)
@@ -901,7 +954,7 @@ export function Session() {
       id: "session.child.first",
       group: "Session",
       run: () => {
-        if (composer.open || session()?.parentID) setComposer("open", false)
+        if (composer.open || (session()?.parentID && !steering())) setComposer("open", false)
         else setComposer("open", true)
         dialog.clear()
       },
@@ -913,6 +966,7 @@ export function Session() {
       palette: undefined,
       enabled: !!session()?.parentID,
       run: () => {
+        if (editorHasText()) return false
         const parentID = session()?.parentID
         if (parentID) {
           navigate({
@@ -1054,13 +1108,18 @@ export function Session() {
                   <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} mode="all" />
                   <Composer
                     sessionID={route.sessionID}
-                    open={composer.open || (!!session()?.parentID && forms().length === 0)}
+                    open={composer.open || (!!session()?.parentID && !steering() && forms().length === 0)}
                     defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
                     onClose={() => setComposer("open", false)}
                   />
                 </Show>
                 <Switch>
-                  <Match when={!promptHidden() && (composer.open || (!!session()?.parentID && forms().length === 0))}>
+                  <Match
+                    when={
+                      !promptHidden() &&
+                      (composer.open || (!!session()?.parentID && !steering() && forms().length === 0))
+                    }
+                  >
                     {null}
                   </Match>
                   <Match when={promptedPermissions().length > 0}>
@@ -1081,6 +1140,11 @@ export function Session() {
                       }}
                     </Show>
                   </Match>
+                  <Match when={!promptHidden() && steeringFinished()}>
+                    {/* Finished subagent: no input box or status line, just the
+                        session.prompt.below slot (the switcher) on its own. */}
+                    <PluginSlot name="session.prompt.below" input={promptSlotInput} mode="all" />
+                  </Match>
                   <Match when={!promptHidden() && !disabled()}>
                     <Prompt
                       visible={true}
@@ -1090,6 +1154,12 @@ export function Session() {
                         toBottom()
                       }}
                       sessionID={route.sessionID}
+                      placeholders={session()?.parentID ? { normal: ["Steer subagent..."] } : undefined}
+                      onEscape={
+                        session()?.parentID
+                          ? () => navigate({ type: "session", sessionID: session()!.parentID! })
+                          : undefined
+                      }
                       sidebar={sidebarVisible()}
                     />
                   </Match>

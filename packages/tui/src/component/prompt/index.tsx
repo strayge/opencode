@@ -68,6 +68,13 @@ export type PromptProps = {
     shell?: string[]
   }
   /**
+   * Replaces the escape-to-interrupt behavior: escape runs this instead of
+   * counting toward a session interrupt, and works while idle too. Used by
+   * child-session views so escape returns to the parent session instead of
+   * aborting the subagent.
+   */
+  onEscape?: () => void
+  /**
    * Whether the route currently shows its sidebar. Only reaches the
    * `session.prompt.footer.trailing` slot input, so a plugin can render a
    * stateful control for a panel the Prompt itself knows nothing about.
@@ -450,13 +457,17 @@ export function Prompt(props: PromptProps) {
         name: "session.interrupt",
         category: "Session",
         palette: undefined,
-        enabled: status() === "running",
+        enabled: status() === "running" || props.onEscape !== undefined,
         run: () => {
           if (auto()?.visible) return
           if (!input.focused) return
           // TODO: this should be its own command
           if (store.mode === "shell") {
             setStore("mode", "normal")
+            return
+          }
+          if (props.onEscape) {
+            props.onEscape()
             return
           }
           if (!props.sessionID) return
@@ -1417,6 +1428,46 @@ export function Prompt(props: PromptProps) {
 
   const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
 
+  // Input for the session.prompt.below slot, mounted between the in-box status
+  // line and the footer/path row. Carries the Prompt's theme tokens as reactive
+  // getters so a plugin can frame its content as part of the input cluster
+  // (plugins have no theme access of their own).
+  const belowSlotInput = {
+    get sessionID() {
+      return props.sessionID
+    },
+    theme: {
+      // Match the input box exactly so the panel's left line and background are
+      // continuous with it (borderHighlight/promptBg are the Prompt's own).
+      get border() {
+        return borderHighlight()
+      },
+      // Plain (un-tinted) border default — darker than the agent-tinted
+      // borderHighlight, for a subtle in-panel divider.
+      get divider() {
+        return theme.border.default
+      },
+      get background() {
+        return promptBg()
+      },
+      get text() {
+        return theme.text.default
+      },
+      get textSubdued() {
+        return theme.text.subdued
+      },
+      get accent() {
+        return theme.hue.accent[500]
+      },
+      get success() {
+        return theme.text.feedback.success.default
+      },
+      get error() {
+        return theme.text.feedback.error.default
+      },
+    },
+  }
+
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
@@ -1576,6 +1627,10 @@ export function Prompt(props: PromptProps) {
             </box>
           </box>
         </box>
+        {/* Mounted above the input box's bottom cap so its content shares the
+            input background (no transparent gap between it and the in-box status
+            line); the cap below becomes the cluster's bottom edge. */}
+        <PluginSlot name="session.prompt.below" input={belowSlotInput} mode="all" />
         <box
           height={1}
           border={["left"]}
@@ -1625,7 +1680,7 @@ export function Prompt(props: PromptProps) {
                         fg: store.interrupt > 0 ? theme.background.action.primary.default : theme.text.subdued,
                       }}
                     >
-                      {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                      {props.onEscape ? "back" : store.interrupt > 0 ? "again to interrupt" : "interrupt"}
                     </span>
                   </text>
                 </box>

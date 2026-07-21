@@ -215,6 +215,24 @@ export interface SlotMap {
     readonly theme: SlotTheme
   }
   /**
+   * Renders directly under the input box. Presence also opts child sessions
+   * into steering mode, where the Prompt replaces the forced-open Composer.
+   */
+  readonly "session.prompt.below": {
+    /** Undefined on the home route, where the shared Prompt renders without a session. */
+    readonly sessionID?: string
+    readonly theme: {
+      readonly border: RGBA
+      readonly divider: RGBA
+      readonly background: RGBA
+      readonly text: RGBA
+      readonly textSubdued: RGBA
+      readonly accent: RGBA
+      readonly success: RGBA
+      readonly error: RGBA
+    }
+  }
+  /**
    * Replaces the built-in context/cost reading in the prompt footer. Core keeps
    * the live-work status, the separators, and the empty-state behavior around it.
    */
