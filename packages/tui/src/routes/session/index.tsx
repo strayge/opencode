@@ -1646,6 +1646,7 @@ function SessionGroupView(props: {
 
 function AssistantFooter(props: { message: SessionMessageAssistant }) {
   const ctx = use()
+  const data = useData()
   const local = useLocal()
   const dimensions = useTerminalDimensions()
   const theme = useTheme("elevated")
@@ -1656,9 +1657,22 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
         .find((model) => model.providerID === props.message.model.providerID && model.id === props.message.model.id)
         ?.name ?? `${props.message.model.providerID}/${props.message.model.id}`,
   )
-  const duration = createMemo(() =>
-    props.message.time.completed ? props.message.time.completed - props.message.time.created : 0,
-  )
+  // Every step of a turn is its own assistant message, and only the final one renders a footer.
+  // Measuring from that message alone reports the last request's latency instead of the turn's
+  // wall time, hiding everything spent in tools (subagents especially), so walk back to the first
+  // step of the turn — the point where the turn's first request went out to the provider.
+  const started = createMemo(() => {
+    const messages = data.session.message.list(ctx.sessionID)
+    const index = messages.findIndex((message) => message.id === props.message.id)
+    let start = props.message.time.created
+    for (let i = index - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.type === "user" || message.type === "synthetic" || message.type === "compaction") break
+      if (message.type === "assistant") start = message.time.created
+    }
+    return start
+  })
+  const duration = createMemo(() => (props.message.time.completed ? props.message.time.completed - started() : 0))
   const interrupted = createMemo(() => props.message.error?.message === "Step interrupted")
   return (
     <>
