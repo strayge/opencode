@@ -383,6 +383,9 @@ export function Prompt(props: PromptProps) {
   createEffect(() => {
     const sessionID = props.sessionID
     if (!sessionID || sessionID === syncedSessionID || !local.model.ready) return
+    // The catalog lands after the first /api/model response; until then every model
+    // reads as invalid, so restoring here would warn and then stick to a fallback.
+    if (!local.agent.list().length || !data.location.model.list()?.length) return
     const session = data.session.get(sessionID)
     if (!session) return
     const agent = session.agent && local.agent.list().find((agent) => agent.id === session.agent)
