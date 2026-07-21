@@ -200,3 +200,21 @@ export class ShellNotFoundError extends Schema.TaggedErrorClass<ShellNotFoundErr
   },
   { httpApiStatus: 404 },
 ) {}
+
+export class PluginRpcMethodNotFoundError extends Schema.TaggedErrorClass<PluginRpcMethodNotFoundError>()(
+  "PluginRpcMethodNotFoundError",
+  {
+    method: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class PluginRpcError extends Schema.TaggedErrorClass<PluginRpcError>()(
+  "PluginRpcError",
+  {
+    method: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}

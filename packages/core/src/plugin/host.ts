@@ -15,6 +15,7 @@ import { Bus } from "../bus"
 import { Integration } from "../integration"
 import { Location } from "../location"
 import { Model } from "../model"
+import { PluginRpc } from "./rpc"
 import { PluginRuntime } from "./runtime"
 import { Provider } from "../provider"
 import { Reference } from "../reference"
@@ -40,6 +41,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: import("../p
   const tools = yield* Tool.Service
   const websearch = yield* WebSearch.Service
   const hooks = yield* PluginHooks.Service
+  const rpc = yield* PluginRpc.Service
   const runtime = yield* PluginRuntime.Service
   const locationInfo = () =>
     new Location.Info({
@@ -272,6 +274,11 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: import("../p
     },
     plugin: {
       list: () => response(plugin.list()),
+      rpc: (input) => response(rpc.call(input.method, input.payload)),
+    },
+    rpc: {
+      register: (method, handler) => rpc.register(method, handler),
+      call: (method, payload) => rpc.call(method, payload),
     },
     reference: {
       list: () => response(reference.list()),

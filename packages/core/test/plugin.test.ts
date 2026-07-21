@@ -6,6 +6,7 @@ import { Agent } from "@opencode-ai/core/agent"
 import { Bus } from "@opencode-ai/core/bus"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
+import { PluginRpc } from "@opencode-ai/core/plugin/rpc"
 import { Session } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Tool } from "@opencode-ai/core/tool"
@@ -397,6 +398,28 @@ describe("Plugin", () => {
         content: [{ type: "text", text: '{"text":"before-mutated"}' }],
         metadata: { rewritten: true },
       })
+    }),
+  )
+
+  it.effect("routes rpc calls to plugin-registered handlers and disposes them with the plugin", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const rpc = yield* PluginRpc.Service
+
+      const plugin = EffectPlugin.define({
+        id: "rpc-plugin",
+        effect: (ctx) =>
+          ctx.rpc.register("rpc-plugin.echo", (payload) => Effect.succeed({ echoed: payload })).pipe(Effect.asVoid),
+      })
+
+      yield* plugins.activate([versioned(plugin)])
+      expect(yield* rpc.list()).toContain("rpc-plugin.echo")
+      expect(yield* rpc.call("rpc-plugin.echo", { value: 1 })).toEqual({ echoed: { value: 1 } })
+
+      yield* plugins.activate([])
+      expect(yield* rpc.list()).not.toContain("rpc-plugin.echo")
+      const missing = yield* rpc.call("rpc-plugin.echo", {}).pipe(Effect.exit)
+      expect(Exit.isFailure(missing)).toBe(true)
     }),
   )
 })

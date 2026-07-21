@@ -23,6 +23,7 @@ import { ModelResolver } from "./model-resolver"
 import { MCP } from "./mcp/index"
 import { Permission } from "./permission"
 import { Plugin } from "./plugin"
+import { PluginRpc } from "./plugin/rpc"
 import { PluginSupervisor } from "./plugin/supervisor"
 import { ProjectCopy } from "./project/copy"
 import { Pty } from "./pty"
@@ -62,6 +63,7 @@ const locationServiceNodes = [
   ModelResolver.node,
   AISDK.node,
   Plugin.node,
+  PluginRpc.node,
   PluginSupervisor.node,
   ProjectCopy.node,
   ProjectCopy.refreshNode,

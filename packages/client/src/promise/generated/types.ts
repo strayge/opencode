@@ -2349,6 +2349,18 @@ export type AgentNotFoundError = {
 export const isAgentNotFoundError = (value: unknown): value is AgentNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "AgentNotFoundError"
 
+export type PluginRpcMethodNotFoundError = {
+  readonly _tag: "PluginRpcMethodNotFoundError"
+  readonly method: string
+  readonly message: string
+}
+export const isPluginRpcMethodNotFoundError = (value: unknown): value is PluginRpcMethodNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PluginRpcMethodNotFoundError"
+
+export type PluginRpcError = { readonly _tag: "PluginRpcError"; readonly method: string; readonly message: string }
+export const isPluginRpcError = (value: unknown): value is PluginRpcError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PluginRpcError"
+
 export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly message: string }
 export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
@@ -2557,6 +2569,19 @@ export type PluginListInput = {
 export type PluginListOutput = {
   location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
   data: Array<PluginInfo>
+}
+
+export type PluginRpcInput = {
+  readonly method: { readonly method: string }["method"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly payload?: { readonly payload?: unknown | undefined }["payload"]
+}
+
+export type PluginRpcOutput = {
+  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  data: JsonValue
 }
 
 export type SessionListInput = {

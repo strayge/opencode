@@ -269,6 +269,19 @@ export function fromPromise(plugin: Plugin) {
           },
           plugin: {
             list: (input) => run(host.plugin.list(input)),
+            rpc: (input) => run(host.plugin.rpc(input)),
+          },
+          rpc: {
+            register: (method, handler) =>
+              register(
+                host.rpc.register(method, (payload) =>
+                  Effect.tryPromise({
+                    try: () => Promise.resolve(handler(payload)),
+                    catch: (error) => error,
+                  }),
+                ),
+              ),
+            call: (method, payload) => Effect.runPromiseWith(context)(host.rpc.call(method, payload)),
           },
           reference: {
             list: (input) => run(host.reference.list(input)),

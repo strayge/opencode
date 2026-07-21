@@ -11,6 +11,8 @@ import type {
   AgentGetOutput,
   PluginListInput,
   PluginListOutput,
+  PluginRpcInput,
+  PluginRpcOutput,
   SessionListInput,
   SessionListOutput,
   SessionCreateInput,
@@ -429,6 +431,19 @@ export function make(options: ClientOptions) {
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      rpc: (input: PluginRpcInput, requestOptions?: RequestOptions) =>
+        request<PluginRpcOutput>(
+          {
+            method: "POST",
+            path: `/api/plugin/rpc/${encodeURIComponent(input.method)}`,
+            query: { location: input["location"] },
+            body: { payload: input["payload"] },
+            successStatus: 200,
+            declaredStatuses: [404, 500, 401, 400],
             empty: false,
           },
           requestOptions,

@@ -13,6 +13,7 @@ import { Bus } from "./bus"
 import { Integration } from "./integration"
 import { Location } from "./location"
 import { PluginHost } from "./plugin/host"
+import { PluginRpc } from "./plugin/rpc"
 import { PluginRuntime } from "./plugin/runtime"
 import { WebSearch } from "./websearch"
 import { Reference } from "./reference"
@@ -154,6 +155,7 @@ export const node = makeLocationNode({
     Skill.node,
     Tool.node,
     PluginHooks.node,
+    PluginRpc.node,
     PluginRuntime.node,
     WebSearch.node,
   ],

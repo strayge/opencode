@@ -16,6 +16,7 @@ import { Location } from "@opencode-ai/core/location"
 import { Npm } from "@opencode-ai/util/npm"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
+import { PluginRpc } from "@opencode-ai/core/plugin/rpc"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { Reference } from "@opencode-ai/core/reference"
 import { Skill } from "@opencode-ai/core/skill"
@@ -49,6 +50,7 @@ export const PluginTestLayer = AppNodeBuilder.build(
     Catalog.node,
     Command.node,
     Integration.node,
+    PluginRpc.node,
     PluginRuntime.node,
     PluginHooks.node,
     Reference.node,

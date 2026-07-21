@@ -92,8 +92,17 @@ export type Endpoint4_0Input = {
 export type Endpoint4_0Output = { readonly location: Location.Info; readonly data: ReadonlyArray<Plugin.Info> }
 export type PluginListOperation<E = never> = (input?: Endpoint4_0Input) => Effect.Effect<Endpoint4_0Output, E>
 
+export type Endpoint4_1Input = {
+  readonly method: string
+  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  readonly payload?: unknown | undefined
+}
+export type Endpoint4_1Output = { readonly location: Location.Info; readonly data: unknown }
+export type PluginRpcOperation<E = never> = (input: Endpoint4_1Input) => Effect.Effect<Endpoint4_1Output, E>
+
 export interface PluginApi<E = never> {
   readonly list: PluginListOperation<E>
+  readonly rpc: PluginRpcOperation<E>
 }
 
 export type Endpoint5_0Input = {
