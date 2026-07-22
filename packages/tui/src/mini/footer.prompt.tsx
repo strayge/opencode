@@ -52,7 +52,7 @@ type Auto = RunFooterMenuItem & {
 type SlashOption = RunFooterMenuItem & {
   kind: "slash"
   name: string
-  action?: "skill-menu" | "editor" | "settings"
+  action?: "skill-menu" | "editor" | "settings" | "model-menu"
 }
 
 type PromptOption = Auto | SlashOption
@@ -81,6 +81,7 @@ type PromptInput = {
   onExit: () => void
   onSkillMenu: () => void
   onSettings: () => void
+  onModelMenu: () => void
   onRows: (rows: number) => void
   onStatus: (text: string) => void
 }
@@ -381,6 +382,13 @@ export function createPromptState(input: PromptInput): PromptState {
         name: "editor",
         display: "/editor",
         description: "compose in your external editor",
+      } satisfies SlashOption,
+      {
+        kind: "slash",
+        action: "model-menu" as const,
+        name: "model",
+        display: "/model",
+        description: "switch the active model",
       } satisfies SlashOption,
       {
         kind: "slash",
@@ -833,6 +841,12 @@ export function createPromptState(input: PromptInput): PromptState {
       if (next.action === "settings" && !shell()) {
         cancelAutocomplete()
         input.onSettings()
+        return
+      }
+
+      if (next.action === "model-menu" && !shell()) {
+        cancelAutocomplete()
+        input.onModelMenu()
         return
       }
 

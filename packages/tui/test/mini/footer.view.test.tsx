@@ -1127,6 +1127,50 @@ test("direct footer closes settings with ctrl-c instead of arming exit", async (
   }
 })
 
+test("direct footer opens the model selector from /model", async () => {
+  const submits: RunPrompt[] = []
+  const app = await renderFooter({
+    height: 20,
+    providers: [provider()],
+    onSubmit(prompt) {
+      submits.push(prompt)
+      return true
+    },
+  })
+
+  try {
+    await app.renderOnce()
+    "/model".split("").forEach((key) => app.mockInput.pressKey(key))
+    await app.renderOnce()
+    app.mockInput.pressEnter()
+    await app.renderOnce()
+
+    expect(app.captureCharFrame()).toContain("Select model")
+    // The panel is opened locally; nothing reaches the session as a prompt.
+    expect(submits).toEqual([])
+  } finally {
+    app.cleanup()
+  }
+})
+
+test("direct footer types /model as text in shell mode", async () => {
+  const app = await renderFooter({ height: 20, providers: [provider()] })
+
+  try {
+    await app.renderOnce()
+    app.mockInput.pressKey("!")
+    "/model".split("").forEach((key) => app.mockInput.pressKey(key))
+    await app.renderOnce()
+    app.mockInput.pressEnter()
+    await app.renderOnce()
+
+    expect(app.captureCharFrame()).not.toContain("Select model")
+    expect(app.renderer.currentFocusedEditor?.plainText).toBe("/model ")
+  } finally {
+    app.cleanup()
+  }
+})
+
 test("selectedCommand validates the bound command and refreshes its arguments", () => {
   expect(selectedCommand("/opencode-ts", { name: "opencode-ts", arguments: "", source: "skill" })).toEqual({
     name: "opencode-ts",

@@ -380,6 +380,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     onExit: props.onExit,
     onSkillMenu: openSkillMenu,
     onSettings: openSettings,
+    onModelMenu: openModel,
     onRows: props.onRows,
     onStatus: props.onStatus,
   })

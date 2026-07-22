@@ -436,6 +436,8 @@ export function RunCommandMenuBody(props: {
         action: "model",
         category: "Agent",
         display: "Switch model",
+        footer: "/model",
+        keywords: "/model model switch provider",
       },
       ...(props.queued().length > 0
         ? [
