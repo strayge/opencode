@@ -656,7 +656,10 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     state.variants = variantsFor(state.providers, model)
     state.activeVariant = boot
       ? resolveVariant(ctx.variant, current, saved, state.variants)
-      : current && !state.variants.includes(current)
+      : // An empty list means the catalog has not published this model's variants
+        // yet, not that it offers none, so it cannot be evidence for discarding
+        // one. Matches how the boot path reads the same list.
+        current && state.variants.length > 0 && !state.variants.includes(current)
         ? undefined
         : current
     if (footer.isClosed) return

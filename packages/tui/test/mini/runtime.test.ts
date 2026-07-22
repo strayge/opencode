@@ -776,6 +776,86 @@ describe("run interactive runtime", () => {
     expect(variants?.current).toBe("high")
   })
 
+  test("keeps the restored variant when a refresh lands before the catalog publishes variants", async () => {
+    const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
+    const events: FooterEvent[] = []
+    const api = footer(events)
+    const painted = defer<void>()
+    api.idle = () => painted.promise
+    // The model is offered, but its variants are not published yet -- exactly
+    // the boot snapshot that used to wipe the restored variant on refresh.
+    stubCatalogLists(sdk, {
+      providers: [catalogProvider("openai", "OpenAI")],
+      models: [catalogModel({ id: "gpt-5", providerID: "openai", name: "GPT-5" })],
+    })
+    spyOn(sdk.model, "default").mockResolvedValue({
+      data: { providerID: "opencode", id: "free-model" },
+    } as never)
+    let refreshCatalog: (() => Promise<unknown>) | undefined
+
+    const task = runInteractiveDeferredMode(
+      {
+        host: host({
+          resolveModels: async () => [{ providerID: "openai", modelID: "gpt-5" }],
+          resolveVariant: async () => "low",
+        }),
+        sdk,
+        directory: "/tmp",
+        target: async () => ({
+          sessionID: "ses-variant-refresh",
+          location: { directory: "/tmp", project: { id: "pro-1", directory: "/tmp", canonical: "/tmp" } },
+          agent: "build",
+          model: undefined,
+          variant: undefined,
+          resume: false,
+        }),
+        agent: "build",
+        model: undefined,
+        variant: undefined,
+        files: [],
+      },
+      {
+        createRuntimeLifecycle: async () => ({
+          footer: api,
+          onResize: () => () => {},
+          refreshTheme: () => {},
+          setTitle: () => {},
+          resetForReplay: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        }),
+        streamTransport: Promise.resolve({
+          createSessionTransport: async (input) => {
+            refreshCatalog = () => Promise.resolve(input.onCatalogRefresh?.())
+            await refreshCatalog()
+            return {
+              runPromptTurn: async () => {},
+              queuePromptTurn: async () => {},
+              waitForIdle: async () => {},
+              interruptActiveTurn: async () => {},
+              selectSubagent: () => {},
+              replayOnResize: async () => false,
+              close: async () => {},
+            }
+          },
+          formatUnknownError: (error: unknown) => String(error),
+        }),
+      },
+    )
+
+    painted.resolve()
+    const deadline = Date.now() + 2_000
+    while (!events.some((event) => event.type === "variants") && Date.now() < deadline) await Bun.sleep(1)
+    while (!refreshCatalog && Date.now() < deadline) await Bun.sleep(1)
+    await refreshCatalog?.()
+    api.close()
+    await task
+
+    const variants = events.findLast(
+      (event): event is Extract<FooterEvent, { type: "variants" }> => event.type === "variants",
+    )
+    expect(variants?.current).toBe("low")
+  })
+
   test("falls back to the server default when nothing is remembered", async () => {
     const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
     const events: FooterEvent[] = []
