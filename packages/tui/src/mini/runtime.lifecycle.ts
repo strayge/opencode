@@ -13,6 +13,7 @@ import { CliRenderEvents, createCliRenderer, type CliRenderer, type ScrollbackWr
 import { isFallbackTitle } from "@opencode-ai/util/session-title-fallback"
 import { monoSnapshot } from "./mono"
 import { entrySplash, exitSplash, splashMeta } from "./splash"
+import { splashBranch } from "./git-branch"
 import { resolveRunTheme } from "./theme"
 import type {
   FooterApi,
@@ -214,6 +215,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
           theme: theme.splash,
           showSession: splash.showSession,
           detail: directoryLabel(input.getDirectory(), input.host.paths.home),
+          branch: splashBranch(input.getDirectory(), mono),
           mono,
         })
       : undefined,
@@ -401,6 +403,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
           theme: footer.currentTheme().splash,
           showSession: splash.showSession,
           detail: directoryLabel(input.getDirectory(), input.host.paths.home),
+          branch: splashBranch(input.getDirectory(), mono),
           mono,
         }),
       )

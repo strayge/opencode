@@ -35,6 +35,8 @@ type SplashWriterInput = SplashInput & {
   theme: RunSplashTheme
   showSession?: boolean
   detail?: string
+  // Rendered directly under `detail`, so it only appears alongside it.
+  branch?: string
 }
 
 export type SplashMeta = {
@@ -196,20 +198,31 @@ function build(input: SplashWriterInput, kind: "entry" | "exit", ctx: Scrollback
       })
     }
 
+    const room = Math.max(1, width - body_left)
     push(lines, body_left, top, "OpenCode", right, undefined, TextAttributes.BOLD)
     if (input.detail) {
       push(
         lines,
         body_left,
         top + 1,
-        input.mono
-          ? monoTruncateMiddle(input.detail, Math.max(1, width - body_left), true)
-          : Locale.truncateMiddle(input.detail, Math.max(1, width - body_left)),
+        input.mono ? monoTruncateMiddle(input.detail, room, true) : Locale.truncateMiddle(input.detail, room),
         left,
         undefined,
       )
     }
-    height = top + Math.max(mark.length, input.detail ? 2 : 1)
+    if (input.detail && input.branch) {
+      push(
+        lines,
+        body_left,
+        top + 2,
+        input.mono ? monoTruncate(input.branch, room, true) : Locale.truncate(input.branch, room),
+        left,
+        undefined,
+        TextAttributes.DIM,
+      )
+    }
+    const body = input.detail ? (input.branch ? 3 : 2) : 1
+    height = top + Math.max(mark.length, body)
   }
 
   if (kind === "exit") {
