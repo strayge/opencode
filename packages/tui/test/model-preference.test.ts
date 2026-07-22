@@ -43,3 +43,18 @@ test("atomically serializes patches and variant updates", async () => {
   expect(await repository.resolveVariant(openai)).toBeUndefined()
   expect((await Bun.file(file).json()).variant).toEqual({ "anthropic/claude/sonnet": "low" })
 })
+
+test("saveModel promotes to the front of recent without duplicating", async () => {
+  await using tmp = await tmpdir()
+  const file = path.join(tmp.path, "model.json")
+  const openai = { providerID: "openai", modelID: "gpt-5" }
+  const anthropic = { providerID: "anthropic", modelID: "claude" }
+  const repository = createModelPreferenceRepository(file)
+
+  await repository.saveModel(openai)
+  await repository.saveModel(anthropic)
+  expect(await repository.resolveModels()).toEqual([anthropic, openai])
+
+  await repository.saveModel(openai)
+  expect(await repository.resolveModels()).toEqual([openai, anthropic])
+})

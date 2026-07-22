@@ -151,6 +151,10 @@ export type MiniHost = {
     }
   }
   preferences: {
+    // Most-recent-first. Shared with the full TUI, so entries may name models
+    // this machine's catalog no longer offers.
+    resolveModels(): Promise<NonNullable<RunInput["model"]>[]>
+    saveModel(model: RunInput["model"]): Promise<void>
     resolveVariant(model: RunInput["model"]): Promise<string | undefined>
     saveVariant(model: RunInput["model"], variant: string | undefined): Promise<void>
   }

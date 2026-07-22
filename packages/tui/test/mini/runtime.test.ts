@@ -18,7 +18,7 @@ function ok<T>(data: T) {
   return Promise.resolve(data)
 }
 
-function host(): MiniHost {
+function host(preferences?: Partial<MiniHost["preferences"]>): MiniHost {
   return {
     terminal: { stdin: process.stdin },
     platform: "linux",
@@ -33,8 +33,11 @@ function host(): MiniHost {
     startup: { showTiming: false, now: () => 0 },
     diagnostics: {},
     preferences: {
+      resolveModels: async () => [],
+      saveModel: async () => {},
       resolveVariant: async () => undefined,
       saveVariant: async () => {},
+      ...preferences,
     },
   }
 }
@@ -585,5 +588,267 @@ describe("run interactive runtime", () => {
     expect(catalogs.command).toHaveBeenCalledWith(query, { signal: expect.any(AbortSignal) })
     expect(catalogs.skill).toHaveBeenCalledWith(query, { signal: expect.any(AbortSignal) })
     expect(fileFind).toHaveBeenCalledWith({ query: "index", type: "file", ...query })
+  })
+
+  test("boots on the most recently remembered model, ahead of the server default", async () => {
+    const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
+    const events: FooterEvent[] = []
+    const api = footer(events)
+    const painted = defer<void>()
+    api.idle = () => painted.promise
+    stubCatalogLists(sdk, {
+      providers: [catalogProvider("openai", "OpenAI"), catalogProvider("opencode", "opencode")],
+      models: [
+        catalogModel({ id: "gpt-5", providerID: "openai", name: "GPT-5" }),
+        catalogModel({ id: "free-model", providerID: "opencode", name: "Free Model" }),
+      ],
+    })
+    const fallback = spyOn(sdk.model, "default").mockResolvedValue({
+      data: { providerID: "opencode", id: "free-model" },
+    } as never)
+
+    const task = runInteractiveDeferredMode(
+      {
+        host: host({
+          resolveModels: async () => [
+            { providerID: "openai", modelID: "gpt-5" },
+            { providerID: "opencode", modelID: "free-model" },
+          ],
+        }),
+        sdk,
+        directory: "/tmp",
+        target: async () => ({
+          sessionID: "ses-remembered",
+          location: { directory: "/tmp", project: { id: "pro-1", directory: "/tmp", canonical: "/tmp" } },
+          agent: "build",
+          model: undefined,
+          variant: undefined,
+          resume: false,
+        }),
+        agent: "build",
+        model: undefined,
+        variant: undefined,
+        files: [],
+      },
+      {
+        createRuntimeLifecycle: async () => ({
+          footer: api,
+          onResize: () => () => {},
+          refreshTheme: () => {},
+          setTitle: () => {},
+          resetForReplay: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        }),
+      },
+    )
+
+    painted.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    api.close()
+    await task
+
+    const selected = events.findLast(
+      (event): event is Extract<FooterEvent, { type: "model" }> => event.type === "model",
+    )
+    expect(selected?.selection).toEqual({ providerID: "openai", modelID: "gpt-5" })
+    // Remembering short-circuits the default loader entirely, so a newly
+    // released model cannot hijack the launch.
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  test("remembers a model chosen from the picker", async () => {
+    const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
+    const api = footer()
+    const lifecycleStarted = defer<void>()
+    const saved: Array<{ providerID: string; modelID: string } | undefined> = []
+    let lifecycle!: LifecycleInput
+    stubCatalogLists(sdk, {
+      providers: [catalogProvider("openai", "OpenAI")],
+      models: [catalogModel({ id: "gpt-5", providerID: "openai", name: "GPT-5" })],
+    })
+
+    const task = runInteractiveDeferredMode(
+      {
+        host: host({
+          saveModel: async (model) => {
+            saved.push(model)
+          },
+        }),
+        sdk,
+        directory: "/tmp",
+        target: async () => ({
+          sessionID: "ses-picker",
+          location: { directory: "/tmp", project: { id: "pro-1", directory: "/tmp", canonical: "/tmp" } },
+          agent: "build",
+          model: { providerID: "openai", modelID: "gpt-5" },
+          variant: undefined,
+          resume: false,
+        }),
+        agent: "build",
+        model: { providerID: "openai", modelID: "gpt-5" },
+        variant: undefined,
+        files: [],
+      },
+      {
+        createRuntimeLifecycle: async (input) => {
+          lifecycle = input
+          lifecycleStarted.resolve()
+          return {
+            footer: api,
+            onResize: () => () => {},
+            refreshTheme: () => {},
+            setTitle: () => {},
+            resetForReplay: () => Promise.resolve(),
+            close: () => Promise.resolve(),
+          }
+        },
+      },
+    )
+
+    await lifecycleStarted.promise
+    await lifecycle.onModelSelect?.({ providerID: "openai", modelID: "gpt-5-codex" })
+    // Re-selecting the active model is a no-op and must not rewrite the list.
+    await lifecycle.onModelSelect?.({ providerID: "openai", modelID: "gpt-5-codex" })
+    api.close()
+    await task
+
+    expect(saved).toEqual([{ providerID: "openai", modelID: "gpt-5-codex" }])
+  })
+
+  test("restores the saved variant of the remembered model", async () => {
+    const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
+    const events: FooterEvent[] = []
+    const api = footer(events)
+    const painted = defer<void>()
+    api.idle = () => painted.promise
+    stubCatalogLists(sdk, {
+      providers: [catalogProvider("openai", "OpenAI")],
+      models: [catalogModel({ id: "gpt-5", providerID: "openai", name: "GPT-5", variants: ["low", "high"] })],
+    })
+    spyOn(sdk.model, "default").mockResolvedValue({
+      data: { providerID: "opencode", id: "free-model" },
+    } as never)
+
+    const task = runInteractiveDeferredMode(
+      {
+        host: host({
+          resolveModels: async () => [{ providerID: "openai", modelID: "gpt-5" }],
+          // Saved against the remembered model, which --model never named.
+          resolveVariant: async (model) =>
+            model?.providerID === "openai" && model.modelID === "gpt-5" ? "high" : undefined,
+        }),
+        sdk,
+        directory: "/tmp",
+        target: async () => ({
+          sessionID: "ses-variant",
+          location: { directory: "/tmp", project: { id: "pro-1", directory: "/tmp", canonical: "/tmp" } },
+          agent: "build",
+          model: undefined,
+          variant: undefined,
+          resume: false,
+        }),
+        agent: "build",
+        model: undefined,
+        variant: undefined,
+        files: [],
+      },
+      {
+        createRuntimeLifecycle: async () => ({
+          footer: api,
+          onResize: () => () => {},
+          refreshTheme: () => {},
+          setTitle: () => {},
+          resetForReplay: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        }),
+      },
+    )
+
+    painted.resolve()
+    const deadline = Date.now() + 2_000
+    while (!events.some((event) => event.type === "variants") && Date.now() < deadline) await Bun.sleep(1)
+    api.close()
+    await task
+
+    const variants = events.findLast(
+      (event): event is Extract<FooterEvent, { type: "variants" }> => event.type === "variants",
+    )
+    expect(variants?.current).toBe("high")
+  })
+
+  test("falls back to the server default when nothing is remembered", async () => {
+    const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
+    const events: FooterEvent[] = []
+    const api = footer(events)
+    const painted = defer<void>()
+    api.idle = () => painted.promise
+    stubCatalogLists(sdk, {
+      providers: [catalogProvider("opencode", "opencode")],
+      models: [catalogModel({ id: "free-model", providerID: "opencode", name: "Free Model" })],
+    })
+    spyOn(sdk.model, "default").mockResolvedValue({
+      data: { providerID: "opencode", id: "free-model" },
+    } as never)
+    let refreshCatalog: (() => Promise<unknown>) | undefined
+
+    const task = runInteractiveDeferredMode(
+      {
+        host: host({ resolveModels: async () => [] }),
+        sdk,
+        directory: "/tmp",
+        target: async () => ({
+          sessionID: "ses-fallback",
+          location: { directory: "/tmp", project: { id: "pro-1", directory: "/tmp", canonical: "/tmp" } },
+          agent: "build",
+          model: undefined,
+          variant: undefined,
+          resume: false,
+        }),
+        agent: "build",
+        model: undefined,
+        variant: undefined,
+        files: [],
+      },
+      {
+        createRuntimeLifecycle: async () => ({
+          footer: api,
+          onResize: () => () => {},
+          refreshTheme: () => {},
+          setTitle: () => {},
+          resetForReplay: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        }),
+        streamTransport: Promise.resolve({
+          createSessionTransport: async (input) => {
+            refreshCatalog = () => Promise.resolve(input.onCatalogRefresh?.())
+            await refreshCatalog()
+            return {
+              runPromptTurn: async () => {},
+              queuePromptTurn: async () => {},
+              waitForIdle: async () => {},
+              interruptActiveTurn: async () => {},
+              selectSubagent: () => {},
+              replayOnResize: async () => false,
+              close: async () => {},
+            }
+          },
+          formatUnknownError: (error: unknown) => String(error),
+        }),
+      },
+    )
+
+    painted.resolve()
+    // Nothing is remembered, so the model only arrives once the default loader
+    // runs, which the catalog refresh drives.
+    while (!refreshCatalog) await Bun.sleep(0)
+    await refreshCatalog()
+    while (!events.some((event) => event.type === "model")) await Bun.sleep(0)
+    api.close()
+    await task
+
+    const selected = events.findLast(
+      (event): event is Extract<FooterEvent, { type: "model" }> => event.type === "model",
+    )
+    expect(selected?.selection).toEqual({ providerID: "opencode", modelID: "free-model" })
   })
 })

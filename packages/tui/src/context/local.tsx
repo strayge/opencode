@@ -14,6 +14,7 @@ import {
   cycleModelVariant,
   modelPreferenceKey,
   normalizeModelVariant,
+  recentModels,
   type ModelPreference,
   type ModelPreferenceModel,
 } from "../model-preference"
@@ -29,19 +30,6 @@ export function parseModel(model: string) {
     providerID: providerID,
     modelID: rest.join("/"),
   }
-}
-
-export function recentModels(model: ModelPreferenceModel, recent: ModelPreferenceModel[]) {
-  const seen = new Set<string>()
-  return [model, ...recent]
-    .filter((item) => {
-      const key = modelPreferenceKey(item)
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .slice(0, 10)
-    .map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
 }
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({

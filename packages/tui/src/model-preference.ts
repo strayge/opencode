@@ -43,6 +43,22 @@ export function modelPreferenceKey(model: ModelPreferenceModel) {
   return `${model.providerID}/${model.modelID}`
 }
 
+// Most-recent-first, deduped, capped. Lives here rather than beside its TUI
+// caller so the mini frontend, which reaches this file through the CLI host,
+// can write the same list the TUI reads.
+export function recentModels(model: ModelPreferenceModel, recent: ModelPreferenceModel[]) {
+  const seen = new Set<string>()
+  return [model, ...recent]
+    .filter((item) => {
+      const key = modelPreferenceKey(item)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 10)
+    .map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
+}
+
 export function cycleModelVariant(current: string | undefined, variants: string[]) {
   const named = variants.filter((variant) => variant !== "default")
   if (named.length === 0) return undefined
@@ -106,6 +122,12 @@ export function createModelPreferenceRepository(filePath: string) {
     load,
     patch(value: Partial<ModelPreference>) {
       return update(() => value)
+    },
+    async resolveModels() {
+      return (await load()).recent
+    },
+    saveModel(model: ModelPreferenceModel) {
+      return update((current) => ({ recent: recentModels(model, current.recent) }))
     },
     async resolveVariant(model: ModelPreferenceModel) {
       return (await load()).variant[modelPreferenceKey(model)]

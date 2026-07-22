@@ -18,6 +18,13 @@ type MiniHost = MiniFrontendInput["host"]
 function preferences(statePath: string): MiniHost["preferences"] {
   const repository = createModelPreferenceRepository(path.join(statePath, "model.json"))
   return {
+    resolveModels() {
+      return repository.resolveModels()
+    },
+    async saveModel(model) {
+      if (!model) return
+      await repository.saveModel(model).catch(() => undefined)
+    },
     async resolveVariant(model) {
       if (!model) return
       return repository.resolveVariant(model)

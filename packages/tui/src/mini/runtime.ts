@@ -318,6 +318,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
       state.model = model
       state.activeVariant = undefined
       state.variants = variantsFor(state.providers, model)
+      void input.host.preferences.saveModel(model)
       const switching = input.host.preferences.resolveVariant(model).then((saved) => {
         const current = state.model
         if (!current || current.providerID !== model.providerID || current.modelID !== model.modelID) {
@@ -527,7 +528,10 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     const signal = AbortSignal.any([runtimeController.signal, controller.signal])
     modelAttempt = controller
     try {
-      const info = await abortable(resolveModelInfo(sdk, state.location, signal), signal)
+      const [remembered, info] = await Promise.all([
+        selected ? undefined : input.host.preferences.resolveModels(),
+        abortable(resolveModelInfo(sdk, state.location, signal), signal),
+      ])
       if (
         !info ||
         !currentModelLoad(generation, sdk) ||
@@ -535,12 +539,24 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
           (state.model?.providerID !== selected.providerID || state.model.modelID !== selected.modelID))
       )
         return
+      // Nothing explicit was asked for, so the last model picked here wins over
+      // the server default -- otherwise every newly released model hijacks the
+      // next launch. It is adopted without checking the catalog: this snapshot
+      // may precede plugin settlement, and session execution owns the
+      // authoritative error for a model that is genuinely gone.
+      const model = remembered?.[0]
+      // Resolved for the remembered model rather than ctx.model, or it would
+      // inherit the variant of a model nobody asked for.
+      const rememberedVariant = model ? await input.host.preferences.resolveVariant(model) : undefined
+      if (!currentModelLoad(generation, sdk)) return
+      if (model && !state.model) state.model = model
+      const boot = !!model && state.model?.providerID === model.providerID && state.model.modelID === model.modelID
       applyModelInfo(
         info,
         selected ? session.variant : state.activeVariant,
         { sdk, generation, signal },
-        !!selected,
-        savedVariant,
+        selected ? true : boot,
+        model ? rememberedVariant : savedVariant,
       )
     } finally {
       if (modelAttempt === controller) modelAttempt = undefined
