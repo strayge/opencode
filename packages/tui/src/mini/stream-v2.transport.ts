@@ -52,6 +52,9 @@ type StreamInput = {
   signal?: AbortSignal
   onCatalogRefresh?: (signal?: AbortSignal) => unknown | Promise<unknown>
   contextLimit?: (model: NonNullable<RunInput["model"]>) => number | undefined
+  // Live stream events only, for attention alerts. Hydration replays history
+  // through the messages API instead, so this never fires for the past.
+  onEvent?: (event: RunV2Event, root: boolean) => void
 }
 
 export type SessionTurnInput = {
@@ -883,6 +886,7 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       return
     }
     const source = sessionID(event)
+    input.onEvent?.(event, source === input.sessionID)
     if (
       source === "global" &&
       (event.type === "form.created" || event.type === "form.replied" || event.type === "form.cancelled")

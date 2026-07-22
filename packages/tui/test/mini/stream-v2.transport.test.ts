@@ -351,6 +351,41 @@ describe("V2 mini transport", () => {
     await transport.close()
   })
 
+  test("reports live events for attention, flagging which belong to the root session", async () => {
+    const events = feed()
+    events.push(connected())
+    const ui = footer()
+    const seen: Array<{ type: string; root: boolean }> = []
+    const transport = await createSessionTransport({
+      sdk: sdk({ streams: [events] }),
+      sessionID: "ses_1",
+      thinking: false,
+      footer: ui.api,
+      onEvent: (event, root) => seen.push({ type: event.type, root }),
+    })
+
+    events.push({
+      id: "evt_root_permission",
+      created: 1,
+      type: "permission.v2.asked",
+      durable: durable("ses_1", 1),
+      data: { id: "per_root", sessionID: "ses_1", action: "read", resources: ["src/index.ts"] },
+    } as never)
+    events.push({
+      id: "evt_child_permission",
+      created: 2,
+      type: "permission.v2.asked",
+      durable: durable("ses_child", 1),
+      data: { id: "per_child", sessionID: "ses_child", action: "read", resources: ["src/other.ts"] },
+    } as never)
+
+    while (!seen.some((item) => item.type === "permission.v2.asked" && !item.root)) await Bun.sleep(0)
+
+    expect(seen).toContainEqual({ type: "permission.v2.asked", root: true })
+    expect(seen).toContainEqual({ type: "permission.v2.asked", root: false })
+    await transport.close()
+  })
+
   test("recursively hydrates blockers for direct and transitive descendants", async () => {
     const events = feed()
     events.push(connected())

@@ -29,6 +29,7 @@ import type {
   RunTuiConfig,
 } from "./types"
 import { resolveMiniSettings } from "./runtime.boot"
+import type { MiniAttention } from "./attention"
 import { formatModelLabel } from "./variant.shared"
 
 const FOOTER_HEIGHT = 4
@@ -77,6 +78,7 @@ export type LifecycleInput = {
 
 export type Lifecycle = {
   footer: FooterApi
+  attention?: MiniAttention
   onResize(fn: () => void): () => void
   refreshTheme(): void
   setTitle(title?: string): void
@@ -183,6 +185,15 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
   setTitle(input.sessionTitle)
   const theme = await resolveRunTheme(renderer, tuiConfig.theme, mono)
   renderer.setBackgroundColor(theme.background)
+  // Loaded only when switched on. The sound module resolves its assets at
+  // import time, so a static import would make a missing audio asset a mini
+  // startup failure for everyone rather than a silently absent chime for the
+  // few who enabled it.
+  const attention = tuiConfig.attention.enabled
+    ? await import("./attention")
+        .then((module) => module.createMiniAttention({ renderer, config: tuiConfig }))
+        .catch(() => undefined)
+    : undefined
   const state: SplashState = {
     entry: false,
     exit: false,
@@ -307,6 +318,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
 
     closed = true
     detachSigint()
+    attention?.dispose()
     let wroteExit = false
 
     try {
@@ -346,6 +358,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
 
   return {
     footer,
+    attention,
     refreshTheme() {
       footer.refreshTheme()
     },

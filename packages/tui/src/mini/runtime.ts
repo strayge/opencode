@@ -815,6 +815,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         },
         trace: log,
         onCatalogRefresh: requestCatalogRefresh,
+        onEvent: shell.attention ? (event, root) => shell.attention?.handle(event, root) : undefined,
         contextLimit: (model) =>
           state.providers.find((provider) => provider.id === model.providerID)?.models[model.modelID]?.limit?.context,
       })
