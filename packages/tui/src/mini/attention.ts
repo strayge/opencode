@@ -22,6 +22,50 @@ export type AttentionRenderer = {
   triggerNotification(message: string, title?: string): boolean
 }
 
+export type TerminalFocus = "unknown" | "focused" | "blurred"
+
+/**
+ * Terminal focus, tracked once and shared.
+ *
+ * Core's attention host keeps its own copy internally for its `when` gate, but
+ * does not expose it, and more than one mini feature needs to know whether the
+ * user is actually looking — usage polling pauses while away, and alerts fire
+ * only then. `unknown` is the honest starting state: plenty of terminals and
+ * multiplexers never report focus at all, and callers gate on that themselves
+ * rather than being told a comfortable lie.
+ */
+export function createTerminalFocus(renderer: Pick<AttentionRenderer, "on" | "off">) {
+  let focus: TerminalFocus = "unknown"
+  const listeners = new Set<(focus: TerminalFocus) => void>()
+  const set = (next: TerminalFocus) => {
+    focus = next
+    for (const listener of [...listeners]) listener(next)
+  }
+  const onFocus = () => set("focused")
+  const onBlur = () => set("blurred")
+
+  renderer.on("focus", onFocus)
+  renderer.on("blur", onBlur)
+
+  return {
+    current: (): TerminalFocus => focus,
+    /**
+     * Notified after `current()` has been updated, so a listener reacting to
+     * focus can read the state it just changed to rather than racing the
+     * renderer's own listener order.
+     */
+    subscribe(listener: (focus: TerminalFocus) => void) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    dispose() {
+      listeners.clear()
+      renderer.off("focus", onFocus)
+      renderer.off("blur", onBlur)
+    },
+  }
+}
+
 // The shape mini's transport reports. Narrow on purpose: a structural match on
 // the few event types that matter, so this never has to track the full union.
 export type AttentionEvent = {

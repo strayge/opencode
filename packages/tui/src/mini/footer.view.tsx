@@ -26,6 +26,7 @@ import {
 import { FOOTER_MENU_ROWS, RunFooterMenu } from "./footer.menu"
 import { RunFooterSubagentBody } from "./footer.subagent"
 import { ContextUsage } from "./context-cache"
+import { UsageSegment, usageGroupWidth, usageGroups } from "./provider-usage.view"
 import { createSubagentSteering } from "./subagent.steer"
 import { RunPromptBody, createPromptState } from "./footer.prompt"
 import { RunPermissionBody } from "./footer.permission"
@@ -56,6 +57,7 @@ import type {
   RunReference,
 } from "./types"
 import type { RunTheme } from "./theme"
+import type { UsageSnapshot } from "./provider-usage"
 
 registerOpencodeSpinner()
 
@@ -113,6 +115,7 @@ type RunFooterViewProps = {
   onLayout: (input: { route: FooterPromptRoute; subagentRows: number }) => void
   onStatus: (text: string) => void
   onMiniSettingChange: (change: MiniSettingChange) => void | Promise<void>
+  usage?: () => UsageSnapshot
   onSubagentSelect?: (sessionID: string | undefined) => void
   onSubagentInterrupt?: (sessionID: string) => void
   onSubagentSteer?: (sessionID: string, text: string) => void
@@ -454,6 +457,16 @@ export function RunFooterView(props: RunFooterViewProps) {
 
     return theme().muted
   })
+  const usageSnapshot = createMemo<UsageSnapshot>(() => props.usage?.() ?? { windows: {}, stale: false })
+  // Ordered by what deserves the columns; how many of them the row can afford
+  // is the statusline policy's call. Grouped against the snapshot's own clock
+  // rather than the segment's ticking one, so this settles when a poll lands
+  // instead of every countdown tick.
+  const providerUsage = createMemo(() =>
+    footerDetails() && prompt() && !shell()
+      ? usageGroups(usageSnapshot(), Date.now(), undefined, props.currentModel()?.providerID)
+      : [],
+  )
   const statuslineBackground = createMemo(() => theme().status)
   const contextHintCandidates = createMemo(() => {
     if (!footerDetails() || !prompt() || shell()) {
@@ -520,8 +533,10 @@ export function RunFooterView(props: RunFooterViewProps) {
       modelWidth: info ? stringWidth(info.model) : undefined,
       variantWidth: info?.variant ? stringWidth(` ${info.variant}`) : undefined,
       usageWidth: activityMeta() ? stringWidth(activityMeta()) : undefined,
+      providerUsageWidths: providerUsage().map((group) => usageGroupWidth(group, Date.now())),
     })
   })
+  const providerUsageLimit = createMemo(() => statuslineLayout().providerUsageCount)
   const contextHints = createMemo(() => contextHintCandidates().slice(0, statuslineLayout().contextCount))
   const hasStatuslineInfo = createMemo(() => {
     const layout = statuslineLayout()
@@ -990,6 +1005,16 @@ export function RunFooterView(props: RunFooterViewProps) {
                       </text>
                     </box>
                   )}
+                </Show>
+
+                <Show when={providerUsageLimit() > 0}>
+                  <UsageSegment
+                    snapshot={usageSnapshot}
+                    limit={providerUsageLimit}
+                    current={() => props.currentModel()?.providerID}
+                    theme={theme}
+                    mono={props.mono}
+                  />
                 </Show>
 
                 <Show when={statuslineLayout().showAgent && agentStatus()}>

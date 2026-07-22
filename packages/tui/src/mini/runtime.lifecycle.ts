@@ -30,7 +30,7 @@ import type {
   RunTuiConfig,
 } from "./types"
 import { resolveMiniSettings } from "./runtime.boot"
-import type { MiniAttention } from "./attention"
+import { createTerminalFocus, type MiniAttention, type TerminalFocus } from "./attention"
 import { formatModelLabel } from "./variant.shared"
 
 const FOOTER_HEIGHT = 4
@@ -80,6 +80,13 @@ export type LifecycleInput = {
 export type Lifecycle = {
   footer: FooterApi
   attention?: MiniAttention
+  // Optional so a stand-in lifecycle can omit it; absent means unknown, which
+  // is what a headless one honestly knows about terminal focus.
+  focused?(): TerminalFocus
+  // The user turning up: focus regained, or a key pressed in a terminal that
+  // never reports focus at all. Distinct from stream events, which are the
+  // agent working and say nothing about whether anyone is watching.
+  onPresence?(fn: () => void): () => void
   onResize(fn: () => void): () => void
   refreshTheme(): void
   setTitle(title?: string): void
@@ -190,6 +197,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
   // import time, so a static import would make a missing audio asset a mini
   // startup failure for everyone rather than a silently absent chime for the
   // few who enabled it.
+  const focus = createTerminalFocus(renderer)
   const attention = tuiConfig.attention.enabled
     ? await import("./attention")
         .then((module) => module.createMiniAttention({ renderer, config: tuiConfig }))
@@ -321,6 +329,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     closed = true
     detachSigint()
     attention?.dispose()
+    focus.dispose()
     let wroteExit = false
 
     try {
@@ -361,6 +370,24 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
   return {
     footer,
     attention,
+    focused: focus.current,
+    onPresence(fn) {
+      // Keystrokes matter as much as focus here: plenty of terminals and
+      // multiplexers never report focus, and typing is the one presence signal
+      // they all have. Both are read straight from the renderer's key handler,
+      // which sees every key before any renderable does.
+      const offFocus = focus.subscribe((next) => {
+        if (next === "focused") fn()
+      })
+      const present = () => fn()
+      renderer.keyInput.on("keypress", present)
+      renderer.keyInput.on("paste", present)
+      return () => {
+        offFocus()
+        renderer.keyInput.off("keypress", present)
+        renderer.keyInput.off("paste", present)
+      }
+    },
     refreshTheme() {
       footer.refreshTheme()
     },

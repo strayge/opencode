@@ -60,6 +60,7 @@ import type {
   RunTuiConfig,
   StreamCommit,
 } from "./types"
+import type { UsageSnapshot } from "./provider-usage"
 
 type CycleResult = {
   modelLabel?: string
@@ -194,6 +195,8 @@ export class RunFooter implements FooterApi {
   private setView: Setter<FooterView>
   private subagent: Accessor<FooterSubagentState>
   private setSubagent: (next: FooterSubagentState) => void
+  private usage: Accessor<UsageSnapshot>
+  private setUsage: Setter<UsageSnapshot>
   private queuedPrompts: Accessor<FooterQueuedPrompt[]>
   private setQueuedPrompts: Setter<FooterQueuedPrompt[]>
   private history: Accessor<RunPrompt[]>
@@ -282,6 +285,9 @@ export class RunFooter implements FooterApi {
     this.theme = theme
     this.setTheme = setTheme
     this.themes = [options.theme]
+    const [usage, setUsage] = createSignal<UsageSnapshot>({ windows: {}, stale: false })
+    this.usage = usage
+    this.setUsage = setUsage
     const [subagent, setSubagent] = createStore<FooterSubagentState>(createEmptySubagentState())
     this.subagent = () => subagent
     this.setSubagent = (next) => {
@@ -321,6 +327,7 @@ export class RunFooter implements FooterApi {
               state: footer.state,
               view: footer.view,
               subagent: footer.subagent,
+              usage: footer.usage,
               queuedPrompts: footer.queuedPrompts,
               findFiles: options.findFiles,
               agents: footer.agents,
@@ -495,6 +502,15 @@ export class RunFooter implements FooterApi {
 
       this.setSubagent(next.state)
       this.applyHeight()
+      return
+    }
+
+    if (next.type === "stream.usage") {
+      if (this.isGone) {
+        return
+      }
+
+      this.setUsage(next.snapshot)
       return
     }
 

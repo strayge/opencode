@@ -47,6 +47,87 @@ describe("run runtime queue", () => {
     expect(calls).toBe(0)
   })
 
+  test("treats /usage as a local command instead of a prompt", async () => {
+    const ui = createFooterApiFixture()
+    const seen: string[] = []
+    let reported = 0
+
+    const task = runPromptQueue({
+      footer: ui.api,
+      run: async (prompt) => {
+        seen.push(prompt.text)
+      },
+      onUsageReport: async () => {
+        reported += 1
+        ui.api.close()
+      },
+    })
+
+    ui.submit("/usage")
+    await task
+
+    expect(reported).toBe(1)
+    // Never reaches the server as a prompt or a session command.
+    expect(seen).toEqual([])
+    // Not a turn, so it leaves the transcript alone.
+    expect(ui.commits).toEqual([])
+  })
+
+  test("keeps /usage local even while a turn is running", async () => {
+    const ui = createFooterApiFixture()
+    const admitted: string[] = []
+    let reported = 0
+    let release = () => {}
+    const running = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    const task = runPromptQueue({
+      footer: ui.api,
+      run: async () => {
+        await running
+      },
+      admit: async (prompt) => {
+        admitted.push(prompt.text)
+      },
+      onUsageReport: async () => {
+        reported += 1
+        ui.api.close()
+      },
+    })
+
+    ui.submit("first")
+    await Bun.sleep(0)
+    // Ordinary prompts submitted mid-turn go to the server's durable queue.
+    // /usage must not, or it would be sent as a prompt when the turn settles.
+    ui.submit("/usage")
+    await Bun.sleep(0)
+    expect(admitted).toEqual([])
+
+    release()
+    await task
+
+    expect(reported).toBe(1)
+  })
+
+  test("falls through to a prompt when no usage handler is wired", async () => {
+    const ui = createFooterApiFixture()
+    const seen: string[] = []
+
+    const task = runPromptQueue({
+      footer: ui.api,
+      run: async (prompt) => {
+        seen.push(prompt.text)
+        ui.api.close()
+      },
+    })
+
+    ui.submit("/usage")
+    await task
+
+    expect(seen).toEqual(["/usage"])
+  })
+
   test("treats /new as a local session command", async () => {
     const ui = createFooterApiFixture()
     const seen: string[] = []

@@ -100,7 +100,13 @@ export async function loadRunCommands(
     sdk.command.list(location(ref), ...requestOptions(signal)),
     sdk.skill.list(location(ref), ...requestOptions(signal)),
   ])
-  return [...commands.data.map(runCommand), ...skills.data.filter((skill) => skill.slash !== false).map(runSkill)]
+  return [
+    ...commands.data.map(runCommand),
+    ...skills.data.filter((skill) => skill.slash !== false).map(runSkill),
+    // Handled locally by the prompt queue rather than sent to the server, but
+    // listed here so it is discoverable in the palette like any other command.
+    { name: "usage", description: "show provider subscription usage" },
+  ]
 }
 
 export async function loadRunReferences(

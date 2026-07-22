@@ -17,6 +17,7 @@ export function footerStatuslinePolicy(input: {
   modelWidth?: number
   variantWidth?: number
   usageWidth?: number
+  providerUsageWidths?: number[]
 }) {
   let remaining = input.width - input.mainWidth - (input.commandWidth ?? 0)
   let hasSection = input.commandWidth !== undefined
@@ -44,11 +45,21 @@ export function footerStatuslinePolicy(input: {
     (showVariant || input.variantWidth === undefined) &&
     include(input.usageWidth, USAGE_HEADROOM)
 
+  // Subscription usage is allocated last, so it is the first thing to go: the
+  // context reading and the model matter every turn, a quota that resets in
+  // days does not. Providers are measured one at a time, closest-to-its-limit
+  // first, so a narrow row keeps only the provider worth the columns. It keeps
+  // the same headroom as the context reading rather than eating it.
+  const providerUsageWidths = input.providerUsageWidths ?? []
+  const hiddenProviderUsage = providerUsageWidths.findIndex((width) => !include(width, USAGE_HEADROOM))
+  const providerUsageCount = hiddenProviderUsage === -1 ? providerUsageWidths.length : hiddenProviderUsage
+
   return {
     showAgent,
     contextCount,
     showModel,
     showVariant,
     showUsage,
+    providerUsageCount,
   }
 }

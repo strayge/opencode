@@ -23,6 +23,7 @@ import type {
 } from "@opencode-ai/client/promise"
 import type { Config } from "../config"
 import type { CliRenderer } from "@opentui/core"
+import type { UsageSnapshot } from "./provider-usage"
 
 export type RunFilePart = {
   type: "file"
@@ -370,6 +371,10 @@ export type FooterEvent =
   | {
       type: "stream.subagent"
       state: FooterSubagentState
+    }
+  | {
+      type: "stream.usage"
+      snapshot: UsageSnapshot
     }
 
 export type PermissionReply = Parameters<OpenCodeClient["permission"]["reply"]>[0]

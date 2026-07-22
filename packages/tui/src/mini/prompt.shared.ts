@@ -58,6 +58,12 @@ export function isCompactCommand(input: string): boolean {
   return text === "/compact" || text === "/summarize"
 }
 
+// Handled in mini rather than sent to the server: a command is a prompt
+// template, and this one only needs to ask the usage RPC and print.
+export function isUsageCommand(input: string): boolean {
+  return input.trim().toLowerCase() === "/usage"
+}
+
 export function createPromptHistory(items?: RunPrompt[]): PromptHistoryState {
   const list = (items ?? []).filter((item) => item.text.trim().length > 0).map(promptCopy)
   const next: RunPrompt[] = []

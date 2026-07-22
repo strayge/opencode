@@ -20,7 +20,9 @@ import {
   resolveSessionInfo,
 } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { createProviderUsage } from "./provider-usage"
 import { steerSubagent } from "./subagent.steer"
+import { formatUsageReport } from "./usage"
 import { cycleVariant, formatModelLabel, resolveVariant } from "./variant.shared"
 import type {
   LocalReplayRow,
@@ -416,6 +418,17 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
   await tuiConfigTask
   const thinking = () => input.thinking ?? configState.current.thinking === "show"
   const footer = shell.footer
+  const usage = createProviderUsage({
+    sdk: () => state.sdk,
+    focused: () => shell.focused?.() ?? "unknown",
+    // Nothing to poll for while the footer details are hidden: the segment is
+    // not drawn, and /usage forces a refresh of its own.
+    enabled: () => configState.current.footer !== "hide",
+    onChange: (snapshot) => footer.event({ type: "stream.usage", snapshot }),
+  })
+  // Coming back to the terminal is what ends a pause, so the reading un-dims on
+  // return rather than on the next thing the agent happens to do.
+  const offPresence = shell.onPresence?.(() => usage.activity())
   const firstPaint = footer.idle().catch(() => {})
   const offRuntimeClose = footer.onClose(() => runtimeController.abort())
   let clientGeneration = 0
@@ -815,7 +828,10 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         },
         trace: log,
         onCatalogRefresh: requestCatalogRefresh,
-        onEvent: shell.attention ? (event, root) => shell.attention?.handle(event, root) : undefined,
+        onEvent: (event, root) => {
+          shell.attention?.handle(event, root)
+          usage.activity()
+        },
         contextLimit: (model) =>
           state.providers.find((provider) => provider.id === model.providerID)?.models[model.modelID]?.limit?.context,
       })
@@ -936,6 +952,15 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
       settle: async () => {
         const next = await ensureStream()
         await next.handle.waitForIdle()
+      },
+      onUsageReport: async () => {
+        const results = await usage.refresh()
+        footer.append({
+          kind: "system",
+          text: formatUsageReport(results, Date.now()),
+          phase: "final",
+          source: "system",
+        })
       },
       onNewSession: createSession
         ? async () => {
@@ -1084,6 +1109,8 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
   } finally {
     runtimeController.abort()
     offRuntimeClose()
+    offPresence?.()
+    usage.close()
 
     await shell.close({
       showExit: state.shown && !!state.sessionID,

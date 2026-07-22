@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test"
-import { alertFor, createMiniAttention, type AttentionRenderer } from "../../src/mini/attention"
+import {
+  alertFor,
+  createMiniAttention,
+  createTerminalFocus,
+  type AttentionRenderer,
+  type TerminalFocus,
+} from "../../src/mini/attention"
 import type { Config } from "../../src/config"
 
 test("blocking requests alert whoever raised them, root session or subagent", () => {
@@ -173,4 +179,31 @@ test("dispose detaches the focus listeners it registered", async () => {
   await settle()
 
   expect(fake.notifications).toEqual([])
+})
+
+test("focus subscribers are notified after the state they are reacting to has changed", () => {
+  const fake = renderer()
+  const focus = createTerminalFocus(fake)
+  const seen: Array<{ reported: TerminalFocus; current: TerminalFocus }> = []
+  const off = focus.subscribe((reported) => seen.push({ reported, current: focus.current() }))
+
+  try {
+    // Nothing reported yet: terminals and multiplexers that never send focus
+    // must not be mistaken for a user sitting there.
+    expect(focus.current()).toBe("unknown")
+
+    fake.blur()
+    fake.focus()
+
+    expect(seen).toEqual([
+      { reported: "blurred", current: "blurred" },
+      { reported: "focused", current: "focused" },
+    ])
+
+    off()
+    fake.blur()
+    expect(seen.length).toBe(2)
+  } finally {
+    focus.dispose()
+  }
 })
