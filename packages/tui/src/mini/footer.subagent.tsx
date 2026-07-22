@@ -5,6 +5,7 @@ import { registerOpencodeSpinner } from "../component/register-spinner"
 import { Show, createMemo, indexArray } from "solid-js"
 import { SPINNER_FRAMES } from "../component/spinner-frames"
 import { RunEntryContent, separatorRows } from "./scrollback.writer"
+import { SteerField } from "./subagent.steer"
 import type { FooterSubagentDetail, FooterSubagentTab } from "./types"
 import type { RunFooterTheme, RunTheme } from "./theme"
 
@@ -56,6 +57,12 @@ export function RunFooterSubagentBody(props: {
   // Formatted interrupt shortcut from the registered keymap binding; the
   // command itself is dispatched through the keymap in footer.view.
   interrupt?: () => string | undefined
+  // Steering is a separate mode inside the inspector: while it is open the
+  // field owns the keyboard, so the scroll and cycle keys below stand down.
+  steering?: () => boolean
+  steer?: () => string | undefined
+  onSteer?: (text: string) => void
+  onSteerCancel?: () => void
   shellOutput?: () => boolean
   mono?: boolean
 }) {
@@ -98,13 +105,24 @@ export function RunFooterSubagentBody(props: {
   ))
   let scroll: ScrollBoxRenderable | undefined
 
+  const steering = createMemo(() => props.steering?.() ?? false)
   const interruptHint = createMemo(() => {
     if (tab()?.status !== "running") return undefined
     return props.interrupt?.()
   })
+  const steerHint = createMemo(() => {
+    if (steering() || tab()?.status !== "running" || !props.onSteer) return undefined
+    return props.steer?.()
+  })
 
   useKeyboard((event) => {
     if (!props.active()) {
+      return
+    }
+
+    // The steer field handles its own escape (close the field, keep the
+    // inspector open) and everything else is text.
+    if (steering()) {
       return
     }
 
@@ -157,6 +175,13 @@ export function RunFooterSubagentBody(props: {
                   <span style={{ fg: footer().muted }}>{"  " + subtitle()}</span>
                 </Show>
               </text>
+              <Show when={steerHint()}>
+                {(hint) => (
+                  <text fg={footer().muted} wrapMode="none" truncate flexShrink={0}>
+                    {hint()} steer
+                  </text>
+                )}
+              </Show>
               <Show when={interruptHint()}>
                 {(hint) => (
                   <text fg={footer().muted} wrapMode="none" truncate flexShrink={0}>
@@ -193,6 +218,23 @@ export function RunFooterSubagentBody(props: {
           </box>
         </scrollbox>
       </box>
+      <Show when={steering()}>
+        <box
+          width="100%"
+          flexShrink={0}
+          paddingLeft={1}
+          paddingRight={3}
+          paddingBottom={1}
+          flexDirection="column"
+          gap={0}
+        >
+          <SteerField
+            theme={footer()}
+            onSubmit={(text) => props.onSteer?.(text)}
+            onCancel={() => props.onSteerCancel?.()}
+          />
+        </box>
+      </Show>
     </box>
   )
 }

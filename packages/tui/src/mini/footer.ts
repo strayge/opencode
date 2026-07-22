@@ -99,6 +99,7 @@ type RunFooterOptions = {
   onEditorOpen: (input: { value: string }) => Promise<string | undefined>
   onSubagentSelect?: (sessionID: string | undefined) => void
   onSubagentInterrupt?: (sessionID: string) => void
+  onSubagentSteer?: (sessionID: string, text: string) => void
   subscribeThemeSignal: (listener: () => void) => () => void
 }
 
@@ -357,6 +358,7 @@ export class RunFooter implements FooterApi {
               onMiniSettingChange: footer.handleMiniSettingChange,
               onSubagentSelect: options.onSubagentSelect,
               onSubagentInterrupt: options.onSubagentInterrupt,
+              onSubagentSteer: options.onSubagentSteer,
             })
           },
         }),

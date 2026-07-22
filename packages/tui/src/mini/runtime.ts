@@ -20,6 +20,7 @@ import {
   resolveSessionInfo,
 } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { steerSubagent } from "./subagent.steer"
 import { cycleVariant, formatModelLabel, resolveVariant } from "./variant.shared"
 import type {
   LocalReplayRow,
@@ -393,6 +394,17 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     onSubagentInterrupt: (sessionID) => {
       log?.write("send.subagent.interrupt", { sessionID })
       void state.sdk.session.interrupt({ sessionID }).catch(() => {})
+    },
+    onSubagentSteer: (sessionID, text) => {
+      const { messageID, sent } = steerSubagent({ sdk: state.sdk, sessionID, text })
+      log?.write("send.subagent.steer", { sessionID, messageID })
+      void sent.catch(() => {
+        log?.write("send.subagent.steer.error", { sessionID, messageID })
+        // The inspector hides the statusline, so this surfaces on return to the
+        // composer. The steered message never appearing in the child's
+        // transcript is the immediate signal.
+        shell.footer.event({ type: "stream.patch", patch: { status: "failed to steer subagent" } })
+      })
     },
     onSubagentSelect: (sessionID) => {
       state.selectSubagent?.(sessionID)

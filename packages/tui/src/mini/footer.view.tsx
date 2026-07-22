@@ -25,6 +25,7 @@ import {
 } from "./footer.command"
 import { FOOTER_MENU_ROWS, RunFooterMenu } from "./footer.menu"
 import { RunFooterSubagentBody } from "./footer.subagent"
+import { createSubagentSteering } from "./subagent.steer"
 import { RunPromptBody, createPromptState } from "./footer.prompt"
 import { RunPermissionBody } from "./footer.permission"
 import { RunFormBody } from "./footer.form"
@@ -113,6 +114,7 @@ type RunFooterViewProps = {
   onMiniSettingChange: (change: MiniSettingChange) => void | Promise<void>
   onSubagentSelect?: (sessionID: string | undefined) => void
   onSubagentInterrupt?: (sessionID: string) => void
+  onSubagentSteer?: (sessionID: string, text: string) => void
 }
 
 export function RunFooterView(props: RunFooterViewProps) {
@@ -187,6 +189,14 @@ export function RunFooterView(props: RunFooterViewProps) {
   const queuedShortcut = () => shortcut("session.queued_prompts")
   const backgroundShortcut = () => shortcut("session.background")
   const subagentInterruptShortcut = () => shortcut("subagent.interrupt")
+  const subagentSteerShortcut = () => shortcut("subagent.steer")
+  const steer = createSubagentSteering({
+    enabled: () =>
+      active().type === "prompt" &&
+      route().type === "subagent" &&
+      selectedTab()?.status === "running" &&
+      !!props.onSubagentSteer,
+  })
   const interrupt = () => shortcut("session.interrupt")
   const variantCycle = () => monoShortcut(shortcuts.all("variant.cycle") ?? "", props.mono)
   const clearShortcut = () => shortcut("prompt.clear")
@@ -1049,6 +1059,21 @@ export function RunFooterView(props: RunFooterViewProps) {
             onCycle={cycleTab}
             onClose={closeTab}
             interrupt={() => subagentInterruptShortcut() || undefined}
+            steering={steer.steering}
+            steer={() => subagentSteerShortcut() || undefined}
+            onSteer={
+              props.onSubagentSteer
+                ? (text) => {
+                    const current = selectedTab()
+                    if (current?.status !== "running") {
+                      return
+                    }
+
+                    props.onSubagentSteer?.(current.sessionID, text)
+                  }
+                : undefined
+            }
+            onSteerCancel={steer.close}
             shellOutput={() => props.miniSettings().shell_output === "show"}
             mono={props.mono}
           />
