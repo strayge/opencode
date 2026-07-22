@@ -169,6 +169,8 @@ export type FooterState = {
   notice: string
   model: string
   usage: string
+  // When the turn behind `usage` made its request, for prompt-cache staleness.
+  usageAt?: number
   first: boolean
   interrupt: number
   exit: number

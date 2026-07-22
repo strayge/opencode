@@ -25,6 +25,7 @@ import {
 } from "./footer.command"
 import { FOOTER_MENU_ROWS, RunFooterMenu } from "./footer.menu"
 import { RunFooterSubagentBody } from "./footer.subagent"
+import { ContextUsage } from "./context-cache"
 import { createSubagentSteering } from "./subagent.steer"
 import { RunPromptBody, createPromptState } from "./footer.prompt"
 import { RunPermissionBody } from "./footer.permission"
@@ -422,7 +423,9 @@ export function RunFooterView(props: RunFooterViewProps) {
   })
   const activityMeta = createMemo(() => {
     if (!footerDetails()) return ""
-    return props.mono ? usage().replaceAll(" · ", " - ") : usage()
+    // Rendered by ContextUsage, which owns the mono separator so it can split
+    // context from cost first.
+    return usage()
   })
   const agentStatus = createMemo(() => {
     if (!footerDetails() || !prompt() || shell() || !props.currentAgentExplicit()) return undefined
@@ -978,7 +981,12 @@ export function RunFooterView(props: RunFooterViewProps) {
                   {(usage) => (
                     <box paddingRight={1} backgroundColor="transparent" flexShrink={0}>
                       <text fg={theme().muted} wrapMode="none">
-                        {usage()}
+                        <ContextUsage
+                          usage={usage}
+                          usageAt={() => props.state().usageAt}
+                          theme={theme}
+                          mono={props.mono}
+                        />
                       </text>
                     </box>
                   )}

@@ -515,6 +515,7 @@ export class RunFooter implements FooterApi {
       notice: typeof next.notice === "string" ? next.notice : prev.notice,
       model: typeof next.model === "string" ? next.model : prev.model,
       usage: typeof next.usage === "string" ? next.usage : prev.usage,
+      usageAt: typeof next.usage === "string" ? next.usageAt : prev.usageAt,
       first: typeof next.first === "boolean" ? next.first : prev.first,
       interrupt:
         typeof next.interrupt === "number" && Number.isFinite(next.interrupt)

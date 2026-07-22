@@ -345,7 +345,9 @@ describe("V2 mini transport", () => {
     })
 
     while (!ui.events.some((event) => event.type === "stream.patch" && event.patch.usage)) await Bun.sleep(0)
-    expect(ui.events).toContainEqual({ type: "stream.patch", patch: { usage: "7.5K (5%)" } })
+    // usageAt is the step's *start* (created: 1), not its end (created: 2):
+    // the prompt cache ages from when the request was made.
+    expect(ui.events).toContainEqual({ type: "stream.patch", patch: { usage: "7.5K (5%)", usageAt: 1 } })
     await transport.close()
   })
 

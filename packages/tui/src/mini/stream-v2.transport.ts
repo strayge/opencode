@@ -147,6 +147,9 @@ type State = {
   admitted: Set<string>
   stepModel: RunInput["model"]
   activeCompaction?: string
+  // Request time of the step in flight, carried to its usage reading so the
+  // statusline can age the prompt cache.
+  stepStartedAt?: number
 }
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
@@ -495,7 +498,10 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
   })
   controller.signal.addEventListener("abort", () => subagents.close(), { once: true })
 
-  const write = (commits: StreamCommit[], patch?: { phase?: "idle" | "running"; status?: string; usage?: string }) => {
+  const write = (
+    commits: StreamCommit[],
+    patch?: { phase?: "idle" | "running"; status?: string; usage?: string; usageAt?: number },
+  ) => {
     if (state.closed || controller.signal.aborted || input.footer.isClosed) return
     if (!state.initial && state.buffered === undefined)
       commits.forEach((commit) => {
@@ -936,6 +942,7 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
     }
     if (event.type === "session.step.started") {
       state.stepModel = { providerID: event.data.model.providerID, modelID: event.data.model.id }
+      state.stepStartedAt = event.created
       write([], { phase: "running", status: "assistant responding" })
       return
     }
@@ -1225,15 +1232,19 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
         event.data.tokens.cache.read +
         event.data.tokens.cache.write
       const limit = state.stepModel ? input.contextLimit?.(state.stepModel) : undefined
+      const startedAt = state.stepStartedAt
       state.stepModel = undefined
+      state.stepStartedAt = undefined
       const usage = total > 0 ? formatContextUsage(total, limit ? Math.round((total / limit) * 100) : undefined) : ""
       write([], {
         usage: event.data.cost ? `${usage} · ${money.format(event.data.cost)}` : usage,
+        usageAt: startedAt,
       })
       return
     }
     if (event.type === "session.step.failed") {
       state.stepModel = undefined
+      state.stepStartedAt = undefined
       const rendered = state.errors.has(event.data.assistantMessageID)
       state.errors.add(event.data.assistantMessageID)
       if (state.wait) state.wait.failureRendered = true
