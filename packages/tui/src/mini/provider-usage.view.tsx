@@ -70,9 +70,10 @@ function peak(group: Group): number {
 /**
  * Columns one group occupies, so the statusline can decide how many fit.
  *
- * Mirrors what the component below renders, trailing padding included. Keep
- * the two in step: over-reporting only costs a provider that would have fit,
- * while under-reporting pushes the sections after it off the row.
+ * Mirrors what the component below renders, less the padding and the leading
+ * mark the statusline policy budgets for every section. Keep the two in step:
+ * over-reporting only costs a provider that would have fit, while
+ * under-reporting pushes the sections after it off the row.
  */
 export function usageGroupWidth(group: Group, now: number): number {
   const labelled = group.windows.length >= 2
@@ -84,7 +85,7 @@ export function usageGroupWidth(group: Group, now: number): number {
       stringWidth(`${percentOf(window)}%`) +
       1 +
       stringWidth(formatDurationShort(window.resetsAt - now)),
-    stringWidth(group.label) + 1,
+    stringWidth(group.label),
   )
 }
 
@@ -94,6 +95,10 @@ export function UsageSegment(props: {
   /** Provider id of the selected model, which leads the row when it reports. */
   current?: () => string | undefined
   theme: () => RunFooterTheme
+  // Whether a statusline section already precedes this one. The row separates
+  // its sections with a leading mark, so each section owns the one in front of
+  // it -- and renders none at all when it has nothing to show.
+  leading?: () => boolean
   mono?: boolean
 }) {
   const [now, setNow] = createSignal(Date.now())
@@ -117,9 +122,12 @@ export function UsageSegment(props: {
 
   return (
     <For each={groups()}>
-      {(group) => (
+      {(group, index) => (
         <box paddingRight={1} backgroundColor="transparent" flexShrink={0}>
           <text fg={props.theme().muted} wrapMode="none" truncate attributes={attrs()}>
+            <Show when={index() === 0 && props.leading?.()}>
+              <span style={{ fg: props.theme().muted }}>{props.mono ? "- " : "· "}</span>
+            </Show>
             {group.label}
             <For each={group.windows}>
               {(window) => (

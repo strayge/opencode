@@ -536,11 +536,16 @@ export function RunFooterView(props: RunFooterViewProps) {
       providerUsageWidths: providerUsage().map((group) => usageGroupWidth(group, Date.now())),
     })
   })
+  // The statusline separates its sections with a leading mark, so each section
+  // renders one when something already drew in front of it -- and none at all
+  // when it has nothing to show.
   const providerUsageLimit = createMemo(() => statuslineLayout().providerUsageCount)
+  const hasProviderUsage = createMemo(() => providerUsageLimit() > 0)
+  const hasContextUsage = createMemo(() => statuslineLayout().showUsage && activityMeta().length > 0)
   const contextHints = createMemo(() => contextHintCandidates().slice(0, statuslineLayout().contextCount))
   const hasStatuslineInfo = createMemo(() => {
     const layout = statuslineLayout()
-    return layout.showUsage || layout.showAgent || layout.showModel
+    return layout.showUsage || hasProviderUsage() || layout.showAgent || layout.showModel
   })
   const sectionSeparator = () => <span style={{ fg: theme().muted }}>{props.mono ? "- " : "· "}</span>
 
@@ -1013,6 +1018,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                     limit={providerUsageLimit}
                     current={() => props.currentModel()?.providerID}
                     theme={theme}
+                    leading={hasContextUsage}
                     mono={props.mono}
                   />
                 </Show>
@@ -1021,7 +1027,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                   {(agent) => (
                     <box paddingRight={1} backgroundColor="transparent" flexShrink={0}>
                       <text fg={theme().text} wrapMode="none">
-                        <Show when={statuslineLayout().showUsage}>{sectionSeparator()}</Show>
+                        <Show when={statuslineLayout().showUsage || hasProviderUsage()}>{sectionSeparator()}</Show>
                         {agent()}
                       </text>
                     </box>
@@ -1032,7 +1038,9 @@ export function RunFooterView(props: RunFooterViewProps) {
                   {(info) => (
                     <box paddingRight={1} backgroundColor="transparent" flexShrink={0}>
                       <text fg={theme().text} wrapMode="none">
-                        <Show when={statuslineLayout().showUsage || statuslineLayout().showAgent}>
+                        <Show
+                          when={statuslineLayout().showUsage || hasProviderUsage() || statuslineLayout().showAgent}
+                        >
                           {sectionSeparator()}
                         </Show>
                         {info().model}

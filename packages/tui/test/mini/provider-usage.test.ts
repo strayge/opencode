@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import type { OpenCodeClient } from "@opencode-ai/client/promise"
 import { createProviderUsage, type UsageSnapshot } from "../../src/mini/provider-usage"
 import { usageGroups } from "../../src/mini/provider-usage.view"
+import { footerStatuslinePolicy } from "../../src/mini/footer.width"
 import {
   formatDurationShort,
   formatUsageReport,
@@ -367,4 +368,31 @@ test("an RPC that throws is survived rather than propagated", async () => {
   } finally {
     usage.close()
   }
+})
+
+test("subscription usage is the first section the statusline drops", () => {
+  const base = { width: 120, mainWidth: 20, contextWidths: [], modelWidth: 24 }
+
+  // Wide: everything is affordable, both providers included.
+  const wide = footerStatuslinePolicy({ ...base, providerUsageWidths: [10, 12] })
+  expect(wide.showModel).toBe(true)
+  expect(wide.providerUsageCount).toBe(2)
+
+  // Tighter: the model keeps its columns and a provider is dropped instead.
+  const tight = footerStatuslinePolicy({ ...base, width: 70, providerUsageWidths: [10, 12] })
+  expect(tight.showModel).toBe(true)
+  expect(tight.providerUsageCount).toBe(1)
+
+  // Tighter still: usage goes entirely before anything else gives way.
+  const narrow = footerStatuslinePolicy({ ...base, width: 48, providerUsageWidths: [10, 12] })
+  expect(narrow.showModel).toBe(true)
+  expect(narrow.providerUsageCount).toBe(0)
+})
+
+test("an absent usage segment costs the other sections nothing", () => {
+  const input = { width: 60, mainWidth: 20, contextWidths: [], modelWidth: 24, agentWidth: 8 }
+  const without = footerStatuslinePolicy(input)
+  const empty = footerStatuslinePolicy({ ...input, providerUsageWidths: [] })
+
+  expect(empty).toEqual({ ...without, providerUsageCount: 0 })
 })
