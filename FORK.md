@@ -11,8 +11,8 @@ The fork's own commits are the contiguous run at the tip of the branch —
 everything below them is upstream — so the base is the parent of the oldest fork
 commit, and `git merge-base HEAD v2` finds it. No sha is recorded here on
 purpose: a literal one rots silently, while the derivation is self-checking.
-Sanity check it by size — against the correct base the fork is roughly 40 files
-and 2.5k insertions. If a diff reports hundreds of files, the base is wrong, not
+Sanity check it by size — against the correct base the fork is roughly 50 files
+and 3.4k insertions. If a diff reports hundreds of files, the base is wrong, not
 the fork.
 
 Entries are grouped by the surface they touch. **Item numbers are permanent
@@ -58,6 +58,14 @@ Upstream fixes:
 - [15 — turn wall-clock duration](#15-turn-wall-clock-duration-in-the-assistant-footer)
 - [16 — catalog-aware session restore](#16-session-agentmodel-restore-waits-for-the-catalog)
 - [17 — selection copy blank rows](#17-selection-copy-preserves-blank-layout-rows)
+- [22 — steering a subagent from mini](#22-steering-a-running-subagent-from-the-mini-inspector)
+- [23 — prompt-cache staleness in mini](#23-prompt-cache-staleness-in-the-mini-statusline)
+- [24 — attention alerts in mini](#24-attention-alerts-in-mini)
+- [25 — branch on the mini splash](#25-checked-out-branch-on-the-mini-splash)
+- [26 — provider usage in mini](#26-provider-subscription-usage-in-mini)
+- [27 — `/model` in mini](#27-model-in-mini)
+- [28 — remembered model in mini](#28-mini-remembers-the-selected-model)
+- [29 — variant survives a filling catalog](#29-a-restored-variant-survives-a-filling-catalog)
 
 Fork tooling:
 
@@ -706,8 +714,9 @@ schema, an early-return line at the top of the `locationLabel` memo, and a
 
 ## Upstream fixes
 
-These four are not extension seams — they are plain bug fixes carried on top of
-upstream, and each should be dropped the moment upstream fixes it.
+These are not extension seams — they are plain fixes carried on top of upstream,
+and each should be dropped the moment upstream fixes it. No plugin consumes any
+of them.
 
 #### 14. `fs.watch` fallback when the native watcher is unavailable
 
@@ -876,6 +885,371 @@ the hand-built fixtures in `selection-text.test.ts` missed.
 
 **Drop when:** upstream OpenTUI starts materializing blank rows itself.
 
+### Mini
+
+The entries in this section target `opencode mini`, and they are native code
+rather than plugins for one reason: **mini has no plugin host, and this fork
+deliberately does not give it one.**
+
+`createPluginRuntime()` is called in exactly one place —
+`packages/tui/src/app.tsx` — and mini never mounts `app.tsx`. There is no slot
+host, no `TuiPluginApi`, and no loader anywhere under
+`packages/tui/src/mini/`. Three consequences follow:
+
+- Every plugin exporting `./tui` is inert under mini, which is nearly all of the
+  ones this fork exists to serve.
+- Every **server** plugin works untouched, because it runs in the server process
+  that mini connects to over the same SDK. `model-discovery` needs nothing: the
+  models it injects already reach mini's picker through `loadRunProviders`.
+- Slot names are full-TUI coordinates. `session.prompt.*`, `sidebar.*`,
+  `home.*` and `app.bottom` all name surfaces mini does not have, so a mini slot
+  host would need its own vocabulary. It is not a re-mount of the existing one.
+
+So each mini entry ports a plugin's *behaviour* rather than the plugin, and the
+sizes justify that. Attention alerts (24) and the server half of provider usage
+(26) need no UI slot at all; prompt-cache staleness (23) and subagent steering
+(22) are one line of state and one argument respectively. Routing those through
+a plugin API would be more machinery than feature. A mini slot host, by
+contrast, means a new slot vocabulary, a loader, a shared-runtime seam, and
+lifecycle ownership inside a footer that is deliberately a single row with a
+width budget — `mini/footer.width.ts` gates every segment by terminal width.
+That is a large fork surface to carry against upstream, for features that mostly
+do not render.
+
+**The bar for revisiting:** wanting *third-party* plugins in mini, or the native
+versions starting to diverge in behaviour from the full-TUI plugins they mirror.
+Until then, native code in `mini/` is smaller, is testable with the existing
+`packages/tui/test/mini/` suite, and rebases more cheaply.
+
+Not every plugin gets a mini entry, and the reasons differ. `markdown-copy` has
+nothing to attach to and nothing to fix: mini writes to the real terminal
+scrollback, so selection and copy are the terminal's own. `terminal-status` is
+simply not ported yet — and will be simpler here than in the full TUI, because
+mini never calls `renderer.setTerminalTitle`, so there is no app-owned base
+title to compose with and item 6's `title.decorate` priority machinery is
+unnecessary. Mini can own the title outright, reusing entry 24's event mapping
+and entry 26's `createTerminalFocus`.
+
+#### 22. Steering a running subagent from the mini inspector
+
+**Files:** `packages/tui/src/mini/subagent.steer.tsx` (new),
+`packages/tui/src/mini/footer.subagent.tsx`, `packages/tui/src/mini/footer.view.tsx`,
+`packages/tui/src/mini/footer.ts`, `packages/tui/src/mini/runtime.lifecycle.ts`,
+`packages/tui/src/mini/runtime.ts`
+
+**What:** The mini subagent inspector gains a steering field. It is a mode, not
+a persistent input: hidden by default, opened with `subagent.steer` (`i`),
+closed by escape before escape reaches the inspector. While it is open the
+inspector's `useKeyboard` returns early so the field owns every key. Submitting
+sends `session.prompt` to the *child* `sessionID` with `delivery: "steer"`, then
+clears the field so corrections can be typed in sequence. The field, the mode,
+and the send all live in the new `subagent.steer.tsx`; the upstream files carry
+the props, an import, and the call sites.
+
+**Why:** Mini could watch a subagent and interrupt it, but not correct it — the
+inspector replaces the whole footer body, so there is no composer to type into
+while it is open, and the backend capability went unused. The full TUI reaches
+the same behavior through the `session.prompt.below` gate (entry 4), which needs
+a plugin; mini has no plugin host, so the behavior is inlined instead. Delivery
+semantics are unchanged from what mini already does — every mini prompt is sent
+as `steer`, and only the target session is new.
+
+**Invariant:** steering exists exactly while the inspector is open on a *running*
+child with a send handler attached; losing any of those drops the field rather
+than leaving it focused over a session it can no longer reach. Escape closes the
+field before it closes the inspector. The scroll and cycle keys keep working
+whenever the field is closed.
+
+**Rebase:** the bulk is a new file with no conflict surface. What lands in
+upstream files is additive and adjacent to the existing `onSubagentInterrupt`
+path — a prop on four hop points (`footer.view` → `footer.ts` →
+`runtime.lifecycle.ts` → `runtime.ts`), which merges silently unless upstream
+rewrites that chain. The riskier hunks are the four inside
+`footer.subagent.tsx`: a guard clause at the top of `useKeyboard`, a hint in the
+header row, and the field as a new sibling below the transcript box. If upstream
+restructures the inspector's layout, re-derive from the invariant rather than
+replaying the diff. `test/mini/subagent.steer.test.tsx` is the guard and is
+likewise a new file.
+
+**Drop when:** upstream adds steering to the mini inspector, or mini grows a
+plugin host that entry 4's plugin can target.
+
+#### 23. Prompt-cache staleness in the mini statusline
+
+**Files:** `packages/tui/src/mini/context-cache.tsx` (new),
+`packages/tui/src/mini/stream-v2.transport.ts`, `packages/tui/src/mini/footer.view.tsx`,
+`packages/tui/src/mini/footer.ts`, `packages/tui/src/mini/types.ts`
+
+**What:** The statusline's context reading turns red once the prompt cache
+behind it is assumed dead. `FooterState` gains `usageAt`, set by the transport
+from `session.step.started`'s `created` and emitted with the usage at
+`session.step.ended`; `ContextUsage` splits the reading into its context and
+cost halves and colours only the context one, re-arming a timer each turn so the
+colour flips at the lapse rather than at the next event. Mono has no error
+colour — every slot in that palette is the foreground — so staleness is a
+trailing `!` there instead.
+
+**Why:** The same policy as the `context-cache-status` plugin (entry 13's
+consumer), which mini cannot run: it has no plugin host. The number is the
+question "how much context", the colour is the question "what will it cost to
+send again", and only the second one changes while you are away. Anchoring on
+the step's *start* rather than its end matches entry 13's `updatedAt` (the
+assistant message's creation time), so the two surfaces agree; for a turn that
+runs minutes the difference is real but well inside an hour.
+
+**Invariant:** the clock is per-turn, not per-session — it restarts on every
+assistant response — and only the context half of the reading carries the
+colour. A session resumed from history shows no staleness until its first turn
+completes, because nothing else writes `usage`.
+
+**Rebase:** additive throughout. In the transport the two new lines ride beside
+the existing `stepModel` writes in the same three branches (started, ended,
+failed), so they widen existing hunks rather than adding new ones; in
+`footer.view.tsx` the JSX swap replaces `{activityMeta()}` with a component and
+moves the mono separator into it. `splitUsage` splits on the `" · "` the
+transport joins with — if upstream changes that separator this degrades to
+colouring the whole reading, which over-colours rather than breaking.
+`test/mini/context-cache.test.tsx` is the guard and asserts real span colours
+through `captureSpans()`.
+
+**Drop when:** upstream reports actual cache lifetimes, or mini grows a plugin
+host that the `context-cache-status` plugin can target.
+
+#### 24. Attention alerts in mini
+
+**Files:** `packages/tui/src/mini/attention.ts` (new),
+`packages/tui/src/mini/stream-v2.transport.ts`, `packages/tui/src/mini/runtime.lifecycle.ts`,
+`packages/tui/src/mini/runtime.ts`, `packages/tui/src/mini/types.ts`
+
+**What:** Mini plays a sound and raises a desktop notification when a turn
+needs the user — permission asked, form created, session done, session failed.
+The machinery is core's own `createTuiAttention`, which already owns the enable
+gate, the focus gate, sound packs, volume, per-sound overrides, and the OS
+notification, and which takes a structurally-typed renderer that mini's
+`CliRenderer` already satisfies. What the fork adds is the mapping from stream
+event to alert, one `onEvent` hook in the transport's `apply`, and construction
+in the lifecycle. `RunTuiConfig` widens by one key so mini can read
+`attention.*` — the same config block the full TUI uses, `enabled: false` by
+default.
+
+**Why:** The `attention-notifications` plugin cannot run under mini, which has
+no plugin host. Unlike that plugin the fork does *not* reimplement the focus
+gate: the plugin passes `when: "always"` and gates itself only because it wants
+an `unknownFocus: "allow"` option and a postpone window, neither of which mini
+needs. Passing `when: "blurred"` hands both gates back to core, which also
+suppresses on unknown focus — the right default for terminals and multiplexers
+that never report focus, where every alert would otherwise fire while the user
+is looking straight at it.
+
+**Invariant:** blocking requests (permission, form) alert whoever raised them,
+root session or subagent, because either one stops the turn; completion and
+failure alert only for the root, because a subagent finishing is a step inside
+a turn that announces itself when it ends. User interruption is silent. The
+hook sees live stream events only — history is hydrated through the messages
+API — so attaching to an old session never replays a burst of sounds.
+
+**Rebase:** one line in `apply` beside the existing `sessionID(event)` call,
+one field on `StreamInput`, one key on the `RunTuiConfig` pick, and
+construction plus disposal in the lifecycle. The mapping and the alert policy
+live in the new file. The lifecycle import is dynamic and gated on
+`attention.enabled`: the sound module resolves its assets at import time, so a
+static import would turn a missing audio asset into a mini startup failure for
+everyone rather than an absent chime for the few who switched it on.
+
+**Drop when:** mini grows a plugin host that `attention-notifications` can
+target.
+
+#### 25. Checked-out branch on the mini splash
+
+**Files:** `packages/tui/src/mini/git-branch.ts` (new),
+`packages/tui/src/mini/splash.ts`, `packages/tui/src/mini/runtime.lifecycle.ts`
+
+**What:** The mini entry splash gains a branch line directly under the working
+directory, aligned with it. Read from the repository's HEAD file rather than by
+running git, walking up from the working directory and following a `gitdir:`
+pointer so a linked worktree or submodule reports its own branch. A detached
+checkout shows an abbreviated sha. Mono spells the marker out (`on main`)
+because the branch glyph is outside ASCII.
+
+**Why:** The `git-branch` plugin's slots (`sidebar.footer.leading`,
+`home.footer.directory.trailing`) name surfaces mini does not have, and mini
+has no plugin host to mount them in. The splash is where mini already answers
+"where am I", so the branch belongs beside the directory and costs no
+statusline width. Registering a `/branch` *command* was considered and
+rejected: a command is a prompt template, so invoking it would cost a model
+turn to print something two syscalls away, and mini's shell mode (`!`) already
+covers the on-demand case.
+
+**Invariant:** the branch renders only alongside the directory, since it is
+positioned relative to that row. The splash is a scrollback snapshot —
+immutable terminal history — so this is a one-shot read with no watching: the
+line records the branch the session opened on, and a later checkout does not
+rewrite history. Reading never throws; a non-repository directory yields no
+line rather than an error.
+
+**Rebase:** the reading and labelling live in the new file. In `splash.ts` the
+entry branch gains one `push` and a body-row count that replaces the inline
+`input.detail ? 2 : 1` height expression — the one hunk that will conflict if
+upstream reworks splash layout; re-derive from the invariant. The lifecycle
+passes `branch:` at both `entrySplash` call sites (startup and replay reset).
+
+**Drop when:** mini grows a plugin host that the `git-branch` plugin can
+target, or upstream puts the branch on the splash itself.
+
+#### 26. Provider subscription usage in mini
+
+**Files:** `packages/tui/src/mini/usage.ts` (new),
+`packages/tui/src/mini/provider-usage.ts` (new),
+`packages/tui/src/mini/provider-usage.view.tsx` (new),
+`packages/tui/src/mini/attention.ts`, `packages/tui/src/mini/runtime.ts`,
+`packages/tui/src/mini/runtime.lifecycle.ts`, `packages/tui/src/mini/runtime.queue.ts`,
+`packages/tui/src/mini/prompt.shared.ts`, `packages/tui/src/mini/catalog.shared.ts`,
+`packages/tui/src/mini/footer.ts`, `packages/tui/src/mini/footer.view.tsx`,
+`packages/tui/src/mini/footer.width.ts`, `packages/tui/src/mini/types.ts`
+
+**What:** A compact subscription-usage segment in the mini statusline
+(`go 22% 22d`), plus `/usage`, which forces a refresh and writes every provider
+and window into scrollback. Mini asks the **existing** provider-usage *server*
+plugin over the fork's RPC endpoint (entry 8) — no backend change, credentials
+never leave the server. `createTerminalFocus` is factored out of entry 24's
+module so focus has one owner.
+
+**Why:** The plugin's TUI half targets `session.prompt.footer.leading` and
+`app.bottom`, neither of which mini has, and mini has no plugin host. The
+server half needs nothing. Three deliberate departures from the plugin: text
+only, because its mini-bars cost five or six columns per provider that mini's
+single contended row cannot spare; no config, because auto-detect plus the
+built-in window pick covers the case without a schema; and scrollback instead
+of a fifteen-second overlay for `/usage`, because scrollback persists, scrolls,
+and copies, and mini has no overlay surface anyway.
+
+**Invariant:** polling pauses while the terminal is blurred or after five
+minutes without user activity, and the values dim rather than vanish — these
+endpoints throttle aggressive polling, so the gates are load-bearing, not
+cosmetic. What ends a pause is the user: focus regained or a keystroke, both
+delivered by the lifecycle's `onPresence`. Events arriving while blurred are the
+agent working, not the user returning, so they must not revive the cadence. The
+selected model's provider leads the segment whenever it reports anything, so the
+one slot a narrow terminal affords goes to the limit the next turn will spend
+against rather than to the highest percentage elsewhere. A provider that lost its
+connection stops showing a reading; a transient fetch failure keeps the last
+good one. `/usage` is handled locally by the prompt queue and never reaches the
+server as a prompt, including when submitted mid-turn, where ordinary prompts
+would be admitted to the durable queue.
+
+**Rebase:** the poller, the wire format, and the view live in the new files.
+Upstream touches are one or two lines each, the riskiest being the statusline
+JSX in `footer.view.tsx` and the new `footerWidthPolicy` flags. `/usage` is
+discoverable without touching `footer.command.tsx`: `loadRunCommands` appends a
+synthetic `RunCommand`, so the palette's existing `action: "slash"` branch
+submits `/usage` and the queue intercepts it the way it already does `/new`.
+Note `mini/attention.ts` now carries both entries 24 and 26, and that
+`onPresence` reads `renderer.keyInput` directly rather than threading a hook
+through the footer, so the composer's key handling is untouched.
+
+**Drop when:** mini grows a plugin host that the `provider-usage` TUI plugin
+can target.
+
+#### 27. `/model` in mini
+
+**Files:** `packages/tui/src/mini/footer.prompt.tsx`,
+`packages/tui/src/mini/footer.command.tsx`, `packages/tui/src/mini/footer.view.tsx`
+
+**What:** A `/model` builtin in the composer's slash menu that opens mini's
+existing model picker, plus the matching alias and keywords on the palette's
+"Switch model" entry.
+
+**Why:** The picker was reachable only by pressing ctrl+p and recognising
+"Switch model" in the list. The slash menu offered `/editor`, `/settings`,
+`/new`, `/compact` and `/exit` but not `/model`, and the palette entry carried
+no slash alias, so typing `/model` — the obvious thing to try, and what the
+full TUI trains — matched nothing at all.
+
+**Invariant:** `/model` opens a panel locally and is never submitted as a
+prompt. That is what separates it from entry 26's `/usage`, which *is* a
+synthetic command the prompt queue intercepts. Shell mode is excluded, as it
+already is for `/settings`, so `!` then `/model` types the text.
+
+**Rebase:** additive throughout — one member on the `SlashOption` action union,
+one entry in each of the two menus, one branch in the prompt's `select`, and
+`openModel` threaded into `createPromptState` exactly as `onSkillMenu` already
+is. Nothing upstream is replaced, so this merges quietly. `"model"` joins the
+slash menu's builtin name list, which shadows a project command of that name
+the same way `editor`, `new` and `settings` already do; the palette needs no
+such guard, since upstream now drops project commands from it wholesale.
+
+**Drop when:** upstream adds a model entry to mini's slash builtins.
+
+#### 28. Mini remembers the selected model
+
+**Files:** `packages/tui/src/model-preference.ts`,
+`packages/tui/src/context/local.tsx`, `packages/cli/src/mini-host.ts`,
+`packages/tui/src/mini/types.ts`, `packages/tui/src/mini/runtime.ts`
+
+**What:** Mini reads and writes the `recent` half of the `model.json` it
+already shares with the full TUI: the picker's choice is saved, and boot adopts
+the most recent remembered model.
+
+**Why:** Mini's host wires up only the *variant* half of that file, so a
+variant chosen in the TUI carries over to mini while a model does not. Mini
+fell through to `sdk.model.default()`, which is the configured default if there
+is one and otherwise `model.available()[0]` — sorted newest-first — so every
+newly released free model hijacked the next launch. Sharing was never the
+question: the file, the repository, and half its API were already crossing the
+frontend boundary.
+
+**Invariant:** the catalog is *not* consulted before adopting a remembered
+model. `model.list` is documented as a snapshot that may precede plugin
+settlement, so a model missing from it is no evidence the model is gone, and
+filtering against it would silently discard a remembered model on slow starts.
+Session execution owns the authoritative error for one that genuinely no longer
+exists — the cost being that a removed provider surfaces at the first prompt
+rather than falling back quietly. The variant resolves for the *remembered*
+model rather than for `ctx.model`, or it inherits the variant of a model nobody
+asked for. Precedence is otherwise unchanged — `--model` and a resumed
+session's model both set `state.model`, which short-circuits ahead of this
+branch.
+
+**Rebase:** the only non-additive hunk is the `recentModels` move from
+`context/local.tsx` into `model-preference.ts`, needed because the CLI host
+cannot import a TUI context file; re-derive it from the invariant if upstream
+reworks either. In `runtime.ts` the no-model branch of `loadCurrentModel` gains
+the `resolveModels` lookup and the variant lookup that follows it, which is the
+hunk that will conflict if upstream touches that branch. This is the fork's
+only entry spanning `packages/cli` and non-mini TUI code.
+
+**Drop when:** upstream gives mini the same `recent` fallback the full TUI has.
+
+#### 29. A restored variant survives a filling catalog
+
+**Files:** `packages/tui/src/mini/runtime.ts`
+
+**What:** the non-boot branch of `applyModelInfo` requires a non-empty
+`state.variants` before treating the list as evidence that the active variant is
+no longer offered.
+
+**Why:** `applyModelInfo` read that list two contradictory ways. The boot path
+goes through `resolveVariant`/`fitVariant`, which treats an empty list as *not
+published yet* and keeps the value. Every later pass took the opposite reading:
+an empty list trivially satisfies `!variants.includes(current)`, so the variant
+was discarded as retired. Nothing surfaced this while variants only ever came
+from `--model` or a resumed session, whose catalog entry is normally present by
+then. Entry 28 hits it every launch — the remembered model resolves before its
+provider publishes variants, so the first catalog refresh wipes the variant boot
+had *just* restored, and mini always starts on the default.
+
+**Invariant:** an empty variant list means unknown, never none. Both readings of
+`state.variants` now agree on that, which is the property to preserve if either
+branch is touched.
+
+**Rebase:** one condition in one expression, inside upstream logic rather than a
+fork-only block — so a rebase can carry it silently while upstream reshapes the
+ternary around it. `packages/tui/test/mini/runtime.test.ts` pins the behavior
+with a refresh arriving before variants are published; that test failing is the
+signal the fix was lost.
+
+**Drop when:** upstream makes the two readings agree, in either direction.
+
 ## Fork tooling
 
 Not a seam and not a fix — a fork-local file that upstream does not have and
@@ -935,6 +1309,14 @@ fork(17)       17        │ each carries a "Drop when", so they sit
 fork(14)       14        │ nearest the tip where --onto can lift them
 fork(15)       15        │ out without disturbing anything below
 fork(16)       16        ┘
+fork(22)       22                                 new file + additive call sites
+fork(23)       23                                 new file + additive call sites
+fork(24)       24                                 new file + additive call sites
+fork(25)       25                                 new file + additive call sites
+fork(26)       26                                 after 24 (extends its focus)
+fork(27)       27                                 additive menu entries
+fork(28)       28                                 packages/cli + shared TUI code
+fork(29)       29                                 after 28 (fixes what it exposes)
 fork(21)       21
 fork(docs)     FORK.md                            amended, not rewritten
 ```
@@ -954,6 +1336,10 @@ upstream condition while keeping its expression verbatim merge silently even in
 the hottest files; entries that replace upstream logic (7, 12, 13) conflict every
 time. That is why the split isolates the latter and batches the former.
 
+Entry 29 is the case neither half covers: it edits a condition inside upstream's
+own expression, so it is quiet like the former but silent like the latter when
+it is lost. Its test is the only thing that catches that.
+
 ## Rebase playbook
 
 ### Hot files, by number of entries touching them
@@ -969,8 +1355,17 @@ Read these first — they carry the most diff and will conflict soonest.
 | `packages/tui/src/plugin/context.tsx` | 5, 6, 7, 11 |
 | `packages/tui/src/routes/session/sidebar.tsx` | 9, 19 |
 | `packages/tui/src/util/selection.ts` | 7, 17 |
+| `packages/tui/src/mini/runtime.lifecycle.ts` | 22, 24, 25, 26 |
+| `packages/tui/src/mini/runtime.ts` | 22, 24, 26, 28, 29 |
+| `packages/tui/src/mini/footer.view.tsx` | 22, 23, 26, 27 |
+| `packages/tui/src/mini/footer.ts` | 22, 23, 26 |
+| `packages/tui/src/mini/attention.ts` (new) | 24, 26 |
+| `packages/tui/src/mini/types.ts` | 23, 26, 28 |
 
-Everything else is a single-entry file or an entirely new one.
+Everything else is a single-entry file or an entirely new one. The `mini/*`
+rows are additive one- and two-line call sites rather than replaced logic, so
+they merge in the quiet way described below — with entry 29 the exception, a
+condition edited inside upstream's own expression.
 
 ### Known upstream collisions
 
@@ -1003,6 +1398,9 @@ Everything else is a single-entry file or an entirely new one.
 - TUI: `packages/tui/test/util/selection.test.ts` and
   `packages/tui/test/util/session.test.ts` (items 7 and 13), plus item 17's
   `selection-text.test.ts` and `selection-text.render.test.ts`.
+- Mini: `packages/tui/test/mini/runtime.test.ts` carries items 28 and 29 —
+  remembered-model precedence, and the variant surviving a refresh that lands
+  before the catalog publishes variants.
 
 ## Verification
 
