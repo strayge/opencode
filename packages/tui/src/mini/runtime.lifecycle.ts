@@ -14,7 +14,7 @@ import { isFallbackTitle } from "@opencode-ai/util/session-title-fallback"
 import { monoSnapshot } from "./mono"
 import { entrySplash, exitSplash, splashMeta } from "./splash"
 import { splashBranch } from "./git-branch"
-import { resolveRunTheme } from "./theme"
+import { resolveMiniTheme } from "./theme.named"
 import type {
   FooterApi,
   FormCancel,
@@ -191,7 +191,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     renderer.setTerminalTitle(`OC | ${title.length > 40 ? title.slice(0, 37) + "..." : title}`)
   }
   setTitle(input.sessionTitle)
-  const theme = await resolveRunTheme(renderer, tuiConfig.theme, mono)
+  const theme = await resolveMiniTheme(renderer, tuiConfig, mono)
   renderer.setBackgroundColor(theme.background)
   // Loaded only when switched on. The sound module resolves its assets at
   // import time, so a static import would make a missing audio asset a mini

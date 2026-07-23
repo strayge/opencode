@@ -363,7 +363,7 @@ function splashTheme(theme: TuiThemeCurrent, indexed: RGBA[]): RunSplashTheme {
   }
 }
 
-function map(
+export function map(
   footerTheme: TuiThemeCurrent,
   scrollbackTheme: TuiThemeCurrent,
   splash: RunSplashTheme,

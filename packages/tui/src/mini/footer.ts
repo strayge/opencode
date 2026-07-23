@@ -35,7 +35,8 @@ import { SUBAGENT_INSPECTOR_ROWS } from "./footer.subagent"
 import { PROMPT_MAX_ROWS, TEXTAREA_MIN_ROWS } from "./footer.prompt"
 import { RunFooterView } from "./footer.view"
 import { RunScrollbackStream } from "./scrollback.surface"
-import { RUN_THEME_FALLBACK, resolveRunTheme, type RunTheme } from "./theme"
+import { RUN_THEME_FALLBACK, type RunTheme } from "./theme"
+import { resolveMiniTheme } from "./theme.named"
 import { modelInfo } from "./variant.shared"
 import type {
   FooterApi,
@@ -1020,7 +1021,7 @@ export class RunFooter implements FooterApi {
   }
 
   private handlePalette = (): void => {
-    void resolveRunTheme(this.renderer, this.options.tuiConfig.theme).then((theme) => {
+    void resolveMiniTheme(this.renderer, this.options.tuiConfig).then((theme) => {
       if (this.isGone) {
         theme.block.syntax?.destroy()
         return

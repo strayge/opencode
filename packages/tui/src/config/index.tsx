@@ -169,6 +169,10 @@ export const Info = Schema.Struct({
       replay_limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).annotate({
         description: "Maximum number of newest messages restored during replay",
       }),
+      theme: Schema.optional(Schema.String).annotate({
+        description:
+          "Named theme for mini; 'system' derives colors from the terminal palette, 'inherit' follows theme.name",
+      }),
     }),
   ).annotate({ description: "Mini transcript presentation settings" }),
   debug: Schema.optional(
