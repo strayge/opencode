@@ -66,6 +66,9 @@ Upstream fixes:
 - [27 — `/model` in mini](#27-model-in-mini)
 - [28 — remembered model in mini](#28-mini-remembers-the-selected-model)
 - [29 — variant survives a filling catalog](#29-a-restored-variant-survives-a-filling-catalog)
+- [30 — named themes in mini](#30-named-themes-in-mini)
+- [31 — the other 33 grammars in mini](#31-syntax-highlighting-for-the-other-33-languages-in-mini)
+- [32 — unhighlightable code blocks](#32-marking-code-blocks-mini-cannot-highlight)
 
 Fork tooling:
 
@@ -1250,6 +1253,148 @@ signal the fix was lost.
 
 **Drop when:** upstream makes the two readings agree, in either direction.
 
+#### 30. Named themes in mini
+
+**Files:** `packages/tui/src/mini/theme.named.ts` (new),
+`packages/tui/src/mini/theme.ts`, `packages/tui/src/mini/runtime.lifecycle.ts`,
+`packages/tui/src/mini/footer.ts`, `packages/tui/src/config/index.tsx`
+
+**What:** a `mini.theme` config option naming a theme from the same registry the
+full TUI reads. Unset or `"system"` keeps the palette-derived look; `"inherit"`
+follows `theme.name`; any other value resolves that theme, bundled or discovered
+from `<config>/themes/*.json`. Mini's two `resolveRunTheme` call sites go through
+`resolveMiniTheme` instead, which delegates straight back to `resolveRunTheme`
+whenever no named theme is both configured and resolvable.
+
+**Why:** mini derives every color from the terminal's ANSI palette, so the only
+way to restyle it was to restyle the terminal — which changes every other
+program in that terminal, and still cannot reach the roles the palette does not
+carry. `generateSystem` hardcodes `markdownHeading` to the foreground and
+computes `textMuted` from background luminance, so headings and muted text are
+unreachable from a palette at any setting. The full TUI has honored
+`theme.name` for as long as it has existed; mini simply never read it.
+
+**Invariant:** three properties, in order of how quietly they break.
+
+*Named themes are not quantized.* The system path snaps scrollback colors onto
+the nearest terminal palette entry (`quantizeTheme`) so mini looks native
+anywhere. Running an authored theme through it substitutes the terminal's
+approximation for the color the theme asked for — a jade accent becomes whatever
+that terminal calls cyan — which looks like a theme that merely renders badly
+rather than a bug. The tests assert `intent !== "indexed"` for exactly this.
+
+*The background stays transparent.* Mini writes scrollback into the real
+terminal scrollback buffer, where it cannot own a background; `generateSystem`
+already returns `alpha(bg, 0)` for that reason. A named theme's background has
+its alpha zeroed and its RGB kept, because `map()` recovers the RGB via
+`alpha(bg, 1)` for the footer's status shades. Honoring it opaquely paints the
+live footer only, seaming against the scrollback above it. The zeroing allocates
+a new RGBA rather than mutating: `resolveThemeColors` aliases the background
+object into `selectedListItemText` when a theme omits that key.
+
+*Discovery honors `OPENCODE_CONFIG_DIR`.* That variable relocates the whole
+config tree, and `Global.Path.config` is compiled in and ignores it — reading
+the latter alone finds no themes at all for a relocated install. Note that
+`context/theme.tsx` reads `Global.Path.config` directly, so the *full TUI* still
+has this bug; mini deliberately does not copy it.
+
+Every failure — absent setting, unknown name, unreadable file, a color reference
+`resolveThemeColors` throws on — falls back to the palette-derived theme rather
+than surfacing. A theme typo must not stop mini from starting, and the default
+path must stay reachable without config changes.
+
+**Rebase:** the diff is shaped to keep the logic out of upstream files. All of it
+lives in the new `theme.named.ts`; `mini/theme.ts` gains a single `export`
+keyword on `map`, and the two call sites change one line each. Nothing inside
+`resolveRunTheme` is touched, which matters because that body is actively
+evolving upstream — mono landed inside it. The `config/index.tsx` hunk is one
+additive key in the `mini` struct and will collide with upstream additions
+there, mechanically. If upstream moves theme resolution, re-derive from the
+invariant: mini resolves its theme through `resolveMiniTheme`, and the named
+branch neither quantizes nor paints a background.
+
+**Drop when:** upstream teaches `resolveRunTheme` to honor a configured theme
+name — at which point delete `theme.named.ts` and revert the call sites.
+
+#### 31. Syntax highlighting for the other 33 languages in mini
+
+**Files:** `packages/tui/src/mini/scrollback.surface.ts`
+
+**What:** `addDefaultParsers(parsers.parsers)` at module scope, giving mini the
+same grammar set the full TUI has.
+
+**Why:** mini highlighted javascript, typescript and markdown and nothing else —
+a ` ```python ` or ` ```bash ` fence rendered as unstyled text, which is most of
+what a coding agent prints. The grammars were never missing:
+`packages/tui/src/parsers-config.ts` has defined 33 of them all along, and
+`routes/session/index.tsx` registers them as an *import side effect*. Mini
+mounts neither `app.tsx` nor the session route, so the call never ran and mini
+saw only what opentui bundles — javascript, typescript, markdown,
+markdown_inline, zig.
+
+**Invariant:** registration must precede tree-sitter client initialization.
+`addDefaultParsers` mutates a list the client reads exactly once, when it
+initializes, so a call ordered after that point is silently a no-op — the
+failure looks like the feature was never added rather than like a bug. Module
+scope next to the `getTreeSitterClient()` call is what guarantees the ordering;
+moving it into a boot step reintroduces the race.
+
+Note this gives mini a network path it did not have: `parsers-config` sources
+wasm and queries from GitHub, cached once under `~/.local/share/opentui`.
+Languages the full TUI has already fetched cost nothing.
+
+**Rebase:** two import lines and one statement, all additive, in a file no other
+entry's logic touches. If upstream gives mini its own parser registration, drop
+this rather than merging both — registering twice is harmless but pointless.
+
+**Drop when:** upstream moves `addDefaultParsers` somewhere mini also reaches.
+
+#### 32. Marking code blocks mini cannot highlight
+
+**Files:** `packages/tui/src/mini/markdown.code.ts` (new),
+`packages/tui/src/mini/scrollback.surface.ts`,
+`packages/tui/src/mini/scrollback.writer.tsx`,
+`packages/tui/src/mini/theme.ts`
+
+**What:** fenced blocks whose language no parser claims render in
+`markdownCodeBlock` instead of the entry's text color. `markdownRenderNode`
+replaces the bare `monoMarkdownRenderNode` at both markdown call sites and
+subsumes it, so mono keeps its ASCII border pass.
+
+**Why:** with no parser, tree-sitter returns zero highlights and
+`MarkdownRenderable`'s `CodeRenderable` falls back to its `fg` — which
+`MarkdownRenderable` sets to the surrounding entry's text color. An unlabeled
+fence was therefore pixel-identical to the prose around it, with nothing marking
+it as code. Entry 31 shrinks the set this applies to but cannot empty it:
+unlabeled fences have no language to register.
+
+**Invariant:** the syntax style cannot solve this, which is the thing to
+re-derive rather than re-litigate. The markdown grammar *does* scope fences as
+`markup.raw.block` — verifiable with `highlightOnce(src, "markdown")` — but
+`MarkdownRenderable` substitutes its own `CodeRenderable` for the fence, so that
+scope never reaches the rendered block. Recoloring the renderable through
+`renderNode` is the only seam.
+
+`hasHighlighting` checks the info string against the filetypes actually
+registered, because `infoStringToFiletype` normalizes aliases but returns
+unknown strings *unchanged* rather than undefined — `"notalang"` comes back as
+`"notalang"`, so its result alone would read as highlightable. `"shell"` and
+`"golang"` are correctly excluded: nothing aliases them onto `bash` and `go`.
+
+`markdownCodeBlock` was a dead key before this — every theme sets it, and in the
+v1 syntax path only `theme/v2/v1-migrate.ts` read it. `generateSystem` maps it
+to the foreground, so the palette-derived default is unchanged and a theme opts
+in by setting it to something else.
+
+**Rebase:** the logic is in a new file; the upstream-file diff is two call sites
+and four additive lines in `theme.ts` (`RunBlockTheme`, `map`, the fallback, and
+the mono theme). The call sites will conflict only if upstream changes how mini
+passes `renderNode`. `packages/tui/test/mini/markdown.code.test.ts` pins the
+behavior — the recolor assertions are what catch a silent revert.
+
+**Drop when:** opentui gives fenced code blocks a `baseHighlight`, or upstream
+styles unhighlightable blocks itself.
+
 ## Fork tooling
 
 Not a seam and not a fix — a fork-local file that upstream does not have and
@@ -1355,10 +1500,13 @@ Read these first — they carry the most diff and will conflict soonest.
 | `packages/tui/src/plugin/context.tsx` | 5, 6, 7, 11 |
 | `packages/tui/src/routes/session/sidebar.tsx` | 9, 19 |
 | `packages/tui/src/util/selection.ts` | 7, 17 |
-| `packages/tui/src/mini/runtime.lifecycle.ts` | 22, 24, 25, 26 |
+| `packages/tui/src/mini/runtime.lifecycle.ts` | 22, 24, 25, 26, 30 |
 | `packages/tui/src/mini/runtime.ts` | 22, 24, 26, 28, 29 |
 | `packages/tui/src/mini/footer.view.tsx` | 22, 23, 26, 27 |
-| `packages/tui/src/mini/footer.ts` | 22, 23, 26 |
+| `packages/tui/src/mini/footer.ts` | 22, 23, 26, 30 |
+| `packages/tui/src/config/index.tsx` | 12, 30 |
+| `packages/tui/src/mini/scrollback.surface.ts` | 31, 32 |
+| `packages/tui/src/mini/theme.ts` | 30, 32 |
 | `packages/tui/src/mini/attention.ts` (new) | 24, 26 |
 | `packages/tui/src/mini/types.ts` | 23, 26, 28 |
 
@@ -1400,7 +1548,12 @@ condition edited inside upstream's own expression.
   `selection-text.test.ts` and `selection-text.render.test.ts`.
 - Mini: `packages/tui/test/mini/runtime.test.ts` carries items 28 and 29 —
   remembered-model precedence, and the variant surviving a refresh that lands
-  before the catalog publishes variants.
+  before the catalog publishes variants. `packages/tui/test/mini/theme.named.test.ts`
+  carries item 30; the quantization and transparent-background assertions there
+  are the ones that catch a silently reverted invariant.
+  `packages/tui/test/mini/scrollback.parsers.test.ts` carries item 31 and needs
+  the opentui grammar cache (or network on a cold one);
+  `packages/tui/test/mini/markdown.code.test.ts` carries item 32.
 
 ## Verification
 
