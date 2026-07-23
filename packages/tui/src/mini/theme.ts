@@ -46,6 +46,8 @@ export type RunFooterTheme = {
 export type RunBlockTheme = {
   text: ColorInput
   muted: ColorInput
+  // Fenced blocks whose language no parser claims, so they never get highlights.
+  codeBlock: ColorInput
   syntax?: SyntaxStyle
   diffRemoved: ColorInput
   diffAddedBg: ColorInput
@@ -425,6 +427,7 @@ export function map(
     block: {
       text: scrollbackTheme.text,
       muted: scrollbackTheme.textMuted,
+      codeBlock: scrollbackTheme.markdownCodeBlock,
       syntax,
       diffRemoved: scrollbackTheme.diffRemoved,
       diffAddedBg: transparent,
@@ -494,6 +497,7 @@ export const RUN_THEME_FALLBACK: RunTheme = {
   block: {
     text: seed.text,
     muted: seed.muted,
+    codeBlock: seed.text,
     diffRemoved: seed.error,
     diffAddedBg: alpha(seed.success, 0.18),
     diffRemovedBg: alpha(seed.error, 0.18),
@@ -543,6 +547,7 @@ function monoTheme(mode: "dark" | "light"): RunTheme {
     block: {
       text: foreground,
       muted: foreground,
+      codeBlock: foreground,
       diffRemoved: foreground,
       diffAddedBg: background,
       diffRemovedBg: background,

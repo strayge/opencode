@@ -16,6 +16,7 @@ import {
 } from "@opentui/core"
 import parsers from "../parsers-config"
 import { entryBody, entryCanStream, entryDone, entryFlags } from "./entry.body"
+import { markdownRenderNode } from "./markdown.code"
 import { monoMarkdownRenderable, monoMarkdownTableOptions } from "./mono"
 import { entryColor, entryLook, entrySyntax } from "./scrollback.shared"
 import { turnSummaryCommit } from "./turn-summary"
@@ -190,6 +191,7 @@ export class RunScrollbackStream {
               streaming: true,
               internalBlockMode: "top-level",
               tableOptions: this.mono ? monoMarkdownTableOptions : { widthMode: "content" },
+              renderNode: markdownRenderNode(this.theme.block.codeBlock),
               fg: entryColor(commit, this.theme),
               treeSitterClient,
             })

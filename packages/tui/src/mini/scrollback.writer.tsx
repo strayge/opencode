@@ -8,6 +8,7 @@ import {
 } from "@opentui/core"
 import { Match, Switch, createMemo } from "solid-js"
 import { entryBody, entryFlags } from "./entry.body"
+import { markdownRenderNode } from "./markdown.code"
 import { monoMarkdownRenderable, monoMarkdownTableOptions } from "./mono"
 import { entryColor, entryLook, entrySyntax } from "./scrollback.shared"
 import { toolFiletype, toolStructuredFinal } from "./tool"
@@ -85,6 +86,7 @@ export function RunEntryContent(props: {
   const body = createMemo(() => props.body ?? entryBody(props.commit, props.opts))
   const style = createMemo(() => entryLook(props.commit, theme().entry))
   const syntax = createMemo(() => entrySyntax(theme()))
+  const renderNode = createMemo(() => markdownRenderNode(theme().block.codeBlock))
   const color = createMemo(() => entryColor(props.commit, theme()))
   const suppressBackgrounds = createMemo(() => props.opts?.suppressBackgrounds === true)
   const diffBg = (color: ColorInput) => (suppressBackgrounds() ? transparent : color)
@@ -263,6 +265,7 @@ export function RunEntryContent(props: {
           content={markdown()!.content}
           fg={color()}
           tableOptions={props.opts?.mono ? monoMarkdownTableOptions : { widthMode: "content" }}
+          renderNode={renderNode()}
         />
       </Match>
     </Switch>
