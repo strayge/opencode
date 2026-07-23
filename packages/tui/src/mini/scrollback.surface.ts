@@ -8,11 +8,13 @@ import {
   CodeRenderable,
   MarkdownRenderable,
   TextRenderable,
+  addDefaultParsers,
   getTreeSitterClient,
   type TreeSitterClient,
   type CliRenderer,
   type ScrollbackSurface,
 } from "@opentui/core"
+import parsers from "../parsers-config"
 import { entryBody, entryCanStream, entryDone, entryFlags } from "./entry.body"
 import { monoMarkdownRenderable, monoMarkdownTableOptions } from "./mono"
 import { entryColor, entryLook, entrySyntax } from "./scrollback.shared"
@@ -20,6 +22,13 @@ import { turnSummaryCommit } from "./turn-summary"
 import { entryWriter, sameEntryGroup, separatorRows, spacerWriter, turnSummaryWriter } from "./scrollback.writer"
 import { type RunTheme } from "./theme"
 import type { RunEntryBody, StreamCommit } from "./types"
+
+// The full TUI registers these as an import side effect of its session route,
+// which mini never mounts. Without it mini sees only the grammars opentui
+// bundles -- javascript, typescript, markdown, zig -- and every other language
+// in a fenced block renders as unstyled text. Must run before the tree-sitter
+// client initializes, hence module scope next to getTreeSitterClient.
+addDefaultParsers(parsers.parsers)
 
 type ActiveBody = Exclude<RunEntryBody, { type: "none" | "structured" }>
 
