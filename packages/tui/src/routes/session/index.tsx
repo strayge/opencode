@@ -1204,8 +1204,16 @@ function SessionRowView(props: SessionRowViewProps) {
     <box id={props.boundaryID} marginTop={1} flexShrink={0}>
       <Switch>
         <Match when={props.row.type === "message" ? props.row : undefined}>
+          {/* keyed so the child holds the message itself rather than a Show
+              accessor. A message can leave the store while its row still
+              exists for a tick, and the child's own memos re-run inside that
+              window — through an accessor that read is a "Stale read from
+              <Show>" throw. Store proxies keep a stable identity across
+              content updates, so keying costs no extra re-creation. */}
           {(row) => (
-            <Show when={props.message(row().messageID)}>{(message) => <SessionMessageView message={message()} />}</Show>
+            <Show when={props.message(row().messageID)} keyed>
+              {(message) => <SessionMessageView message={message} />}
+            </Show>
           )}
         </Match>
         <Match when={props.row.type === "compaction-queued"}>
