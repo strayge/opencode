@@ -11,8 +11,8 @@ The fork's own commits are the contiguous run at the tip of the branch —
 everything below them is upstream — so the base is the parent of the oldest fork
 commit, and `git merge-base HEAD v2` finds it. No sha is recorded here on
 purpose: a literal one rots silently, while the derivation is self-checking.
-Sanity check it by size — against the correct base the fork is roughly 85 files
-and 6.9k insertions. If a diff reports hundreds of files, the base is wrong, not
+Sanity check it by size — against the correct base the fork is roughly 97 files
+and 7.6k insertions. If a diff reports hundreds of files, the base is wrong, not
 the fork.
 
 Entries are grouped by the surface they touch. **Item numbers are permanent
@@ -58,6 +58,7 @@ Upstream fixes:
 - [15 — turn wall-clock duration](#15-turn-wall-clock-duration-in-the-assistant-footer)
 - [16 — catalog-aware session restore](#16-session-agentmodel-restore-waits-for-the-catalog)
 - [17 — selection copy blank rows](#17-selection-copy-preserves-blank-layout-rows)
+- [33 — unsending a queued prompt](#33-unsending-a-queued-prompt-before-the-model-sees-it)
 - [22 — steering a subagent from mini](#22-steering-a-running-subagent-from-the-mini-inspector)
 - [23 — prompt-cache staleness in mini](#23-prompt-cache-staleness-in-the-mini-statusline)
 - [24 — attention alerts in mini](#24-attention-alerts-in-mini)
@@ -887,6 +888,79 @@ drives a real renderer and a real mouse drag, and it catches every regression
 the hand-built fixtures in `selection-text.test.ts` missed.
 
 **Drop when:** upstream OpenTUI starts materializing blank rows itself.
+
+#### 33. Unsending a queued prompt before the model sees it
+
+**Files:** `packages/schema/src/session-event.ts`,
+`packages/core/src/session/{pending,projector,message-updater}.ts`,
+`packages/core/src/session.ts`, `packages/protocol/src/groups/session.ts`,
+`packages/server/src/handlers/session.ts`, regenerated
+`packages/client/src/**`, `packages/tui/src/routes/session/unqueue.ts` (new),
+`packages/tui/src/routes/session/{index,dialog-message}.tsx`,
+`packages/tui/src/context/data.tsx`, `packages/tui/src/config/v1/keybind.ts`
+
+**What:** A third terminal outcome for admitted input. `session.input.revoked`
+joins `admitted` and `promoted`; `SessionPending.revoke` publishes it and
+`projectRevoked` deletes the row *without* projecting a message, so a revoked
+input leaves no trace in history. Reached over
+`DELETE /api/session/:sessionID/pending/:inputID`, which answers 200 with the
+dropped record or 409 when the input is no longer pending.
+
+Two TUI surfaces consume it: an **Unsend** action leading a queued message's
+dialog, and `session.unqueue` (slash `/unqueue`) popping the newest queued
+input, repeatable to walk backwards. Both restore the text, files, and agent
+mentions to the input box through `projectedPromptInput`, the same call
+`Revert` already makes. The keybind is registered as `"none"` — bindable
+without claiming a chord upstream may want.
+
+The message row's `<Show>` in `SessionRowView` is now **keyed**. This is part
+of the entry rather than a separate fix: the hazard is latent upstream, since
+nothing there removes a message that is currently rendered as a row — revert
+commit only drops messages past a boundary the rows already exclude, and
+promotion keeps the message it moves. Revocation is the first removal of a
+*rendered* message, and unkeyed the child's memos re-run through an
+invalidated accessor and throw `Stale read from <Show>`.
+
+**Why:** A prompt typed during a running turn goes out immediately as `steer`
+delivery, so the input box clears and the message is durable before the user
+can reconsider; the only prior way to take it back was `/undo` to an earlier
+message, which discards real history and file changes. Keeping `steer` (rather
+than holding prompts TUI-locally until the turn ends, which would make
+cancellation free) is deliberate: mid-turn insertion is the reason the message
+goes out immediately, and that is worth more than an easy cancel.
+
+**Invariant:** revoke runs under the same inbox lock `promote` holds, so an
+input is either revoked whole or promoted whole and never observed as both.
+Losing that race is an expected outcome, not an error — core resolves to
+`undefined` and only the HTTP layer renders it as 409 — and the TUI never
+removes a row optimistically, so a lost race cannot leave the transcript
+disagreeing with the server.
+
+**Limitation:** `unqueue` revokes exactly the input it is given. A prompt
+submitted with a pending editor selection admits a synthetic input beside the
+user one, and that synthetic is left pending, later promoted alone as a bare
+file selection. Inferring which neighbouring synthetics belong to a prompt
+would silently eat unrelated ones — a backgrounded-work notice, a plugin's —
+so the precise fix is to capture both ids at submit time and thread the pairing
+to the route.
+
+**Rebase:** the core and protocol edits are additive and sit beside their
+`promoted`/`admitted` siblings, so they re-anchor cleanly; adding the event to
+`Event.inventory` is a typed breaking change that surfaces any missing
+exhaustive arm at compile time rather than at runtime. **Rerun `bun run
+generate` in `packages/client` instead of resolving conflicts in
+`packages/client/src/**`.** The riskiest hunk is the keyed `<Show>`, the only
+place this entry edits existing upstream rendering; if upstream restructures
+`SessionRowView`, re-derive from the invariant above rather than replaying the
+diff. The sibling assistant-footer `<Show>` has the same unkeyed shape and is
+deliberately untouched.
+
+**Drop when:** upstream ships input revocation of its own. The keyed `<Show>`
+can go the moment upstream keys it, independently of the rest.
+
+**Note:** mini is untouched. It has no plugin host and sends mid-turn prompts
+as `queue` delivery, so its "Pending work" panel (read-only today) is where the
+same capability would land — a longer cancel window and almost no race.
 
 ### Mini
 
