@@ -11,8 +11,8 @@ The fork's own commits are the contiguous run at the tip of the branch —
 everything below them is upstream — so the base is the parent of the oldest fork
 commit, and `git merge-base HEAD v2` finds it. No sha is recorded here on
 purpose: a literal one rots silently, while the derivation is self-checking.
-Sanity check it by size — against the correct base the fork is roughly 50 files
-and 3.4k insertions. If a diff reports hundreds of files, the base is wrong, not
+Sanity check it by size — against the correct base the fork is roughly 85 files
+and 6.9k insertions. If a diff reports hundreds of files, the base is wrong, not
 the fork.
 
 Entries are grouped by the surface they touch. **Item numbers are permanent
@@ -1008,8 +1008,11 @@ completes, because nothing else writes `usage`.
 **Rebase:** additive throughout. In the transport the two new lines ride beside
 the existing `stepModel` writes in the same three branches (started, ended,
 failed), so they widen existing hunks rather than adding new ones; in
-`footer.view.tsx` the JSX swap replaces `{activityMeta()}` with a component and
-moves the mono separator into it. `splitUsage` splits on the `" · "` the
+`footer.view.tsx` the JSX swap replaces the statusline's usage text with a
+component and moves the mono separator into it. Upstream has since rebuilt that
+row around a measured layout (`footerStatuslinePolicy`), which renders the
+reading through a `<Show>` render-prop — the swap now goes inside that, and
+`activityMeta` stays the raw joined string so `ContextUsage` can split it. `splitUsage` splits on the `" · "` the
 transport joins with — if upstream changes that separator this degrades to
 colouring the whole reading, which over-colours rather than breaking.
 `test/mini/context-cache.test.tsx` is the guard and asserts real span colours
@@ -1126,10 +1129,14 @@ built-in window pick covers the case without a schema; and scrollback instead
 of a fifteen-second overlay for `/usage`, because scrollback persists, scrolls,
 and copies, and mini has no overlay surface anyway.
 
-**Invariant:** polling pauses while the terminal is blurred or after five
-minutes without user activity, and the values dim rather than vanish — these
-endpoints throttle aggressive polling, so the gates are load-bearing, not
-cosmetic. What ends a pause is the user: focus regained or a keystroke, both
+**Invariant:** subscription usage is the *last* section the statusline
+allocates, so it is the first to go when the row is tight — the context reading
+and the model matter every turn, a quota that resets in days does not. Providers
+are budgeted one at a time in the order `usageGroups` ranks them, so a narrow
+row keeps only the one worth the columns. Polling pauses while the terminal is
+blurred or after five minutes without user activity, and the values dim rather
+than vanish — these endpoints throttle aggressive polling, so the gates are
+load-bearing, not cosmetic. What ends a pause is the user: focus regained or a keystroke, both
 delivered by the lifecycle's `onPresence`. Events arriving while blurred are the
 agent working, not the user returning, so they must not revive the cadence. The
 selected model's provider leads the segment whenever it reports anything, so the
@@ -1142,7 +1149,16 @@ would be admitted to the durable queue.
 
 **Rebase:** the poller, the wire format, and the view live in the new files.
 Upstream touches are one or two lines each, the riskiest being the statusline
-JSX in `footer.view.tsx` and the new `footerWidthPolicy` flags. `/usage` is
+JSX in `footer.view.tsx` and the section budget in `footer.width.ts`. That
+budget was originally two breakpoint flags on `footerWidthPolicy`; upstream
+replaced breakpoints with a measured policy, so the entry now adds
+`providerUsageWidths` in / `providerUsageCount` out on `footerStatuslinePolicy`
+and measures each group through `usageGroupWidth`. That function mirrors what
+`UsageSegment` draws and nothing enforces the correspondence but
+`provider-usage.view.test.ts`'s render-vs-measure assertion — under-reporting
+pushes the sections after it off the row, so re-check it whenever the segment's
+rendering changes. If upstream reworks the policy again, re-derive from the
+invariant rather than replaying the diff. `/usage` is
 discoverable without touching `footer.command.tsx`: `loadRunCommands` appends a
 synthetic `RunCommand`, so the palette's existing `action: "slash"` branch
 submits `/usage` and the queue intercepts it the way it already does `/new`.
@@ -1303,6 +1319,15 @@ Every failure — absent setting, unknown name, unreadable file, a color referen
 than surfacing. A theme typo must not stop mini from starting, and the default
 path must stay reachable without config changes.
 
+**Limitation:** only version-1 theme documents resolve. Upstream has since added
+natively authored v2 themes, and mini reaches colors through the v1 path
+(`mini/theme.ts`'s `resolveTheme` reads a `ThemeV1Json`, and `map` wants that
+flat shape), so a discovered v2 file is filtered out and falls back rather than
+being handed to a resolver that cannot read it. Every bundled theme is still v1,
+so this only affects hand-written v2 files. Lifting it means a bridge from
+`resolveThemeDocument`'s output to `TuiThemeCurrent`, which is a bigger change
+than this entry.
+
 **Rebase:** the diff is shaped to keep the logic out of upstream files. All of it
 lives in the new `theme.named.ts`; `mini/theme.ts` gains a single `export`
 keyword on `map`, and the two call sites change one line each. Nothing inside
@@ -1357,9 +1382,12 @@ this rather than merging both — registering twice is harmless but pointless.
 `packages/tui/src/mini/theme.ts`
 
 **What:** fenced blocks whose language no parser claims render in
-`markdownCodeBlock` instead of the entry's text color. `markdownRenderNode`
-replaces the bare `monoMarkdownRenderNode` at both markdown call sites and
-subsumes it, so mono keeps its ASCII border pass.
+`markdownCodeBlock` instead of the entry's text color, through a
+`markdownRenderNode` passed at both markdown call sites. It handles `code`
+tokens only and defers everything else to the default rendering; mono needs
+nothing from it, since upstream now monochromes markdown by transforming the
+renderable tree (`monoMarkdownRenderable`) rather than through `renderNode`, so
+the two passes compose without being threaded together.
 
 **Why:** with no parser, tree-sitter returns zero highlights and
 `MarkdownRenderable`'s `CodeRenderable` falls back to its `fg` — which
@@ -1388,8 +1416,9 @@ in by setting it to something else.
 
 **Rebase:** the logic is in a new file; the upstream-file diff is two call sites
 and four additive lines in `theme.ts` (`RunBlockTheme`, `map`, the fallback, and
-the mono theme). The call sites will conflict only if upstream changes how mini
-passes `renderNode`. `packages/tui/test/mini/markdown.code.test.ts` pins the
+the mono theme). The call sites will conflict whenever upstream changes how mini
+passes `renderNode` — it has done so once already, when mono stopped using that
+seam. `packages/tui/test/mini/markdown.code.test.ts` pins the
 behavior — the recolor assertions are what catch a silent revert.
 
 **Drop when:** opentui gives fenced code blocks a `baseHighlight`, or upstream
@@ -1537,6 +1566,17 @@ condition edited inside upstream's own expression.
   `packages/tui/src/theme/v2/component.ts`. The *plugin-facing* contract is
   unaffected: consumers see a getter returning a color either way, so a token
   reshuffle never requires plugin changes.
+- **The theme registry's own names move too.** Item 30 imports from
+  `packages/tui/src/theme` rather than reading tokens, and upstream's move to
+  native v2 themes renamed `ThemeJson` to `ThemeV1Json` and replaced `isTheme`
+  with `isThemeSource` (which now admits v2 documents the v1 resolver cannot
+  read). Same failure mode as the token reads: no conflict, caught only by the
+  typecheck.
+- **The mini statusline is a moving target.** Its layout was breakpoint flags on
+  `footerWidthPolicy`; it is now a measured allocator, `footerStatuslinePolicy`,
+  which hands each section a width and returns what fits. Items 23 and 26 both
+  render into that row, so a rework there is re-derivation work, not a merge —
+  read their invariants first.
 
 ### Tests carrying the new surface
 
@@ -1554,6 +1594,11 @@ condition edited inside upstream's own expression.
   `packages/tui/test/mini/scrollback.parsers.test.ts` carries item 31 and needs
   the opentui grammar cache (or network on a cold one);
   `packages/tui/test/mini/markdown.code.test.ts` carries item 32.
+  `packages/tui/test/mini/provider-usage.test.ts` pins item 26's place in the
+  statusline budget — that usage is dropped ahead of the model, and that an
+  absent segment costs the other sections nothing — while
+  `provider-usage.view.test.tsx` asserts the measured width equals what the
+  segment actually draws.
 
 ## Verification
 
