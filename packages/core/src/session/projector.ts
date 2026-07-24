@@ -647,6 +647,12 @@ const layer = Layer.effectDiscard(
         )
       }),
     )
+    yield* bus.project(SessionEvent.InputRevoked, (event) =>
+      SessionPending.projectRevoked(db, {
+        id: event.data.inputID,
+        sessionID: event.data.sessionID,
+      }).pipe(Effect.asVoid),
+    )
     yield* bus.project(SessionEvent.InputAdmitted, (event) =>
       Effect.gen(function* () {
         if (event.durable === undefined)

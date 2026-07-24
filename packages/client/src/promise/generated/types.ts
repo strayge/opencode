@@ -639,6 +639,16 @@ export type SessionInputPromoted = {
   data: { sessionID: string; inputID: string }
 }
 
+export type SessionInputRevoked = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.input.revoked"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string; inputID: string }
+}
+
 export type SessionExecutionStarted = {
   id: string
   created: number
@@ -2161,6 +2171,7 @@ export type SessionEventDurable =
   | SessionForked
   | SessionInputPromoted
   | SessionInputAdmitted
+  | SessionInputRevoked
   | SessionExecutionStarted
   | SessionExecutionSucceeded
   | SessionExecutionFailed
@@ -2256,6 +2267,7 @@ export type V2Event =
   | SessionForked
   | SessionInputPromoted
   | SessionInputAdmitted
+  | SessionInputRevoked
   | SessionExecutionStarted
   | SessionExecutionSucceeded
   | SessionExecutionFailed
@@ -3197,6 +3209,13 @@ export type SessionContextOutput = { data: Array<SessionMessageInfo> }["data"]
 export type SessionPendingListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionPendingListOutput = { data: Array<SessionPendingInfo> }["data"]
+
+export type SessionPendingRevokeInput = {
+  readonly sessionID: { readonly sessionID: string; readonly inputID: string }["sessionID"]
+  readonly inputID: { readonly sessionID: string; readonly inputID: string }["inputID"]
+}
+
+export type SessionPendingRevokeOutput = { data: SessionPendingInfo }["data"]
 
 export type SessionInstructionsEntryListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 

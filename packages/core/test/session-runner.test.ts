@@ -2865,6 +2865,115 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("revokes an admitted input before the model sees it", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const { db } = yield* Database.Service
+      yield* admit(session, "Keep this")
+      const dropped = yield* session.prompt({ sessionID, text: "Drop this", resume: false })
+
+      const revoked = yield* session.revoke({ sessionID, inputID: dropped.id })
+      expect(revoked?.id).toEqual(dropped.id)
+      expect(yield* SessionPending.find(db, dropped.id)).toBeUndefined()
+
+      yield* TestLLM.push(TestLLM.stop())
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(userTexts(requests[0])).toEqual(["Keep this"])
+    }),
+  )
+
+  it.effect("revoked input leaves no projected message", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const dropped = yield* session.prompt({ sessionID, text: "Drop this", resume: false })
+      yield* session.revoke({ sessionID, inputID: dropped.id })
+
+      expect(yield* session.message({ sessionID, messageID: dropped.id })).toBeUndefined()
+      expect(yield* session.pending(sessionID)).toEqual([])
+    }),
+  )
+
+  it.effect("reports nothing to revoke once the input is promoted", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const promoted = yield* session.prompt({ sessionID, text: "Already sent", resume: false })
+
+      yield* TestLLM.push(TestLLM.stop())
+      yield* session.resume(sessionID)
+
+      expect(yield* session.revoke({ sessionID, inputID: promoted.id })).toBeUndefined()
+      expect(yield* session.message({ sessionID, messageID: promoted.id })).toMatchObject({ type: "user" })
+    }),
+  )
+
+  it.effect("revokes a steer admitted mid-turn before its step boundary", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Start working")
+
+      yield* TestLLM.push(TestLLM.stop(), TestLLM.stop())
+      const stream = yield* TestLLM.gate
+
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* stream.started
+      const steer = yield* session.prompt({ sessionID, text: "Never mind" })
+      expect(yield* session.revoke({ sessionID, inputID: steer.id })).toMatchObject({ id: steer.id })
+      yield* stream.release
+      yield* Fiber.join(run)
+
+      // The revoke landed before the step boundary, so no continuation request
+      // exists at all — a promoted steer would have forced a second one.
+      expect(requests).toHaveLength(1)
+      expect(userTexts(requests[0])).toEqual(["Start working"])
+    }),
+  )
+
+  it.effect("a steer that wins the race against revoke reaches the model exactly once", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Start working")
+
+      yield* TestLLM.push(TestLLM.stop(), TestLLM.stop())
+      const stream = yield* TestLLM.gate
+
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* stream.started
+      const steer = yield* session.prompt({ sessionID, text: "Too late" })
+      yield* stream.release
+      yield* Fiber.join(run)
+
+      // Promotion won, so the revoke is a no-op rather than a retraction of
+      // input the model already received.
+      expect(yield* session.revoke({ sessionID, inputID: steer.id })).toBeUndefined()
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[1])).toEqual(["Start working", "Too late"])
+    }),
+  )
+
+  it.effect("revoking twice is not an error", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const dropped = yield* session.prompt({ sessionID, text: "Drop this", resume: false })
+
+      expect(yield* session.revoke({ sessionID, inputID: dropped.id })).toMatchObject({ id: dropped.id })
+      expect(yield* session.revoke({ sessionID, inputID: dropped.id })).toBeUndefined()
+    }),
+  )
+
+  it.effect("does not revoke an input belonging to another session", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const { db } = yield* Database.Service
+      yield* insertSession(otherSessionID)
+      const dropped = yield* session.prompt({ sessionID, text: "Drop this", resume: false })
+
+      expect(yield* session.revoke({ sessionID: otherSessionID, inputID: dropped.id })).toBeUndefined()
+      expect(yield* SessionPending.find(db, dropped.id)).toMatchObject({ id: dropped.id })
+    }),
+  )
+
   it.effect("promotes queued input after steering continuation ends", () =>
     Effect.gen(function* () {
       const session = yield* setup

@@ -155,6 +155,21 @@ export const InputAdmitted = Event.durable({
 })
 export type InputAdmitted = typeof InputAdmitted.Type
 
+/**
+ * The third and terminal outcome for an admitted input: dropped before the
+ * runner ever saw it. Promotion and revocation are mutually exclusive, so an
+ * input carries exactly one of the two after admission.
+ */
+export const InputRevoked = Event.durable({
+  type: "session.input.revoked",
+  ...options,
+  schema: {
+    sessionID: SessionID,
+    inputID: SessionMessage.ID,
+  },
+})
+export type InputRevoked = typeof InputRevoked.Type
+
 export namespace Execution {
   export const Started = Event.durable({ type: "session.execution.started", ...options, schema: Base })
   export type Started = typeof Started.Type
@@ -556,6 +571,7 @@ export const Definitions = Event.inventory(
   Forked,
   InputPromoted,
   InputAdmitted,
+  InputRevoked,
   Execution.Started,
   Execution.Succeeded,
   Execution.Failed,

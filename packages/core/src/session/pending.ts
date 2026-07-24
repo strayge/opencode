@@ -230,6 +230,54 @@ export const admitCompaction = Effect.fn("SessionPending.admitCompaction")(funct
   )
 })
 
+/**
+ * Drops one admitted input before the runner consumes it, returning what was
+ * dropped or undefined when there was nothing to drop.
+ *
+ * Held under the inbox lock for the same reason promotion is: a caller
+ * cancelling during an active turn is racing the step boundary, and the lock is
+ * what turns that into a decided outcome — the input is either revoked whole or
+ * promoted whole, never observed as both. Compaction barriers are not
+ * revocable; they have their own settle path.
+ */
+export const revoke = Effect.fn("SessionPending.revoke")(function* (
+  db: DatabaseService,
+  bus: Bus.Interface,
+  input: { readonly sessionID: SessionSchema.ID; readonly id: SessionMessage.ID },
+) {
+  return yield* inboxLocks.withLock(input.sessionID)(
+    Effect.gen(function* () {
+      const existing = yield* find(db, input.id)
+      if (!existing || existing.sessionID !== input.sessionID || existing.type === "compaction") return undefined
+      yield* bus.publish(SessionEvent.InputRevoked, {
+        sessionID: input.sessionID,
+        inputID: input.id,
+      })
+      return existing
+    }),
+  )
+})
+
+/**
+ * Consume one pending row at revocation. Unlike promotion this projects no
+ * message, which is the whole point: the input leaves no trace in history.
+ */
+export const projectRevoked = Effect.fn("SessionPending.projectRevoked")(function* (
+  db: DatabaseService,
+  input: { readonly id: SessionMessage.ID; readonly sessionID: SessionSchema.ID },
+) {
+  const deleted = yield* db
+    .delete(SessionPendingTable)
+    .where(and(eq(SessionPendingTable.id, input.id), eq(SessionPendingTable.session_id, input.sessionID)))
+    .returning()
+    .get()
+    .pipe(Effect.orDie)
+  if (!deleted) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  const stored = fromRow(deleted)
+  if (stored.type === "compaction") return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  return stored
+})
+
 export const projectAdmitted = Effect.fn("SessionPending.projectAdmitted")(function* (
   db: DatabaseService,
   request: {

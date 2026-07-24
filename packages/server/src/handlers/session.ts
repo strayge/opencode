@@ -610,6 +610,31 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.pending.revoke",
+        Effect.fn(function* (ctx) {
+          const revoked = yield* session
+            .revoke({ sessionID: ctx.params.sessionID, inputID: ctx.params.inputID })
+            .pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+            )
+          if (!revoked)
+            return yield* Effect.fail(
+              new ConflictError({
+                message: `Session input is no longer pending: ${ctx.params.inputID}`,
+                resource: ctx.params.inputID,
+              }),
+            )
+          return { data: revoked }
+        }),
+      )
+      .handle(
         "session.instructions.entry.list",
         Effect.fn(function* (ctx) {
           const instructions = yield* InstructionEntry.Service

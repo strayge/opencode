@@ -496,6 +496,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.delete("session.pending.revoke", "/api/session/:sessionID/pending/:inputID", {
+        params: { sessionID: Session.ID, inputID: SessionMessage.ID },
+        success: Schema.Struct({ data: SessionPending.Info }),
+        error: [ConflictError, SessionNotFoundError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.pending.revoke",
+            summary: "Revoke pending session input",
+            description:
+              "Drop one admitted input before the runner promotes it, returning the dropped record. Conflicts when the input is no longer pending, which is the expected outcome when promotion wins the race against the caller. Compaction barriers are not revocable.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.get("session.instructions.entry.list", "/api/session/:sessionID/instructions/entries", {
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Schema.Array(InstructionEntry.Info) }),

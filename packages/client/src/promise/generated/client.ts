@@ -56,6 +56,8 @@ import type {
   SessionContextOutput,
   SessionPendingListInput,
   SessionPendingListOutput,
+  SessionPendingRevokeInput,
+  SessionPendingRevokeOutput,
   SessionInstructionsEntryListInput,
   SessionInstructionsEntryListOutput,
   SessionInstructionsEntryPutInput,
@@ -746,6 +748,17 @@ export function make(options: ClientOptions) {
               path: `/api/session/${encodeURIComponent(input.sessionID)}/pending`,
               successStatus: 200,
               declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        revoke: (input: SessionPendingRevokeInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionPendingRevokeOutput }>(
+            {
+              method: "DELETE",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/pending/${encodeURIComponent(input.inputID)}`,
+              successStatus: 200,
+              declaredStatuses: [409, 404, 400, 401],
               empty: false,
             },
             requestOptions,

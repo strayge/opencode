@@ -210,6 +210,17 @@ export interface Interface {
    */
   readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<SessionPending.Info[], NotFoundError>
   /**
+   * Drops one admitted input before it reaches the model, resolving to the
+   * dropped record or to undefined when there was nothing left to drop —
+   * already promoted, reverted, or never admitted. Undefined is an expected
+   * outcome rather than an error: a caller cancelling during an active turn is
+   * racing the next step boundary and will sometimes lose.
+   */
+  readonly revoke: (input: {
+    sessionID: SessionSchema.ID
+    inputID: SessionMessage.ID
+  }) => Effect.Effect<SessionPending.User | SessionPending.Synthetic | undefined, NotFoundError>
+  /**
    * Durable, ordered session log read. Replays durable session bus after
    * the exclusive `after` cursor, emits a `Synced` marker at the captured
    * replay watermark, then continues live when `follow` is set.
@@ -540,6 +551,17 @@ const layer = Layer.effect(
         yield* result.get(sessionID)
         return yield* SessionPending.list(db, sessionID)
       }),
+      revoke: Effect.fn("Session.revoke")((input) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            yield* result.get(input.sessionID)
+            return yield* SessionPending.revoke(db, bus, {
+              sessionID: input.sessionID,
+              id: input.inputID,
+            })
+          }),
+        ),
+      ),
       log: (input) =>
         Stream.unwrap(
           result
