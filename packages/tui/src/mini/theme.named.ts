@@ -18,7 +18,7 @@
 //     the live footer with an opaque theme background would only produce a
 //     seam against the scrollback above it.
 import { RGBA, type CliRenderer } from "@opentui/core"
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui"
+import type { TuiThemeCurrent } from "@opencode-ai/plugin/v1/tui"
 import { terminalMode } from "../theme/system"
 import type { ThemeV1Json } from "../theme/v1"
 import { map, resolveRunTheme, resolveTheme, type RunSplashTheme, type RunTheme } from "./theme"

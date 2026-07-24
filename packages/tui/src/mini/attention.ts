@@ -9,7 +9,7 @@
 //
 // Everything here is therefore one question: which stream events are worth
 // interrupting someone for, and with which sound.
-import type { TuiAttentionSoundName } from "@opencode-ai/plugin/tui"
+import type { TuiAttentionSoundName } from "@opencode-ai/plugin/v1/tui"
 import { createTuiAttention } from "../attention"
 import type { Config } from "../config"
 

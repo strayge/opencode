@@ -423,6 +423,27 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           )
           break
         }
+        // The mirror of "promoted": the input leaves without ever becoming
+        // history, so the optimistic message appended at admission has to come
+        // back out. Index positions after the removal shift, so it is rebuilt
+        // rather than patched.
+        case "session.input.revoked": {
+          removePending(event.data.sessionID, event.data.inputID)
+          setStore(
+            "session",
+            "input",
+            event.data.sessionID,
+            (store.session.input[event.data.sessionID] ?? []).filter((id) => id !== event.data.inputID),
+          )
+          message.update(event.data.sessionID, (draft, index) => {
+            const position = index.get(event.data.inputID)
+            if (position === undefined) return
+            draft.splice(position, 1)
+            index.clear()
+            draft.forEach((item, indexValue) => index.set(item.id, indexValue))
+          })
+          break
+        }
         case "session.input.admitted":
           addPending({
             id: event.data.inputID,

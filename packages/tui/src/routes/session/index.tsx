@@ -66,6 +66,7 @@ import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
 import { sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
 import { projectedPromptInput } from "../../prompt/codec"
+import { unqueue } from "./unqueue"
 import { useEpilogue } from "../../context/epilogue"
 import { normalizePath } from "../../util/path"
 import { PermissionPrompt } from "./permission"
@@ -148,6 +149,17 @@ export function Session() {
   const promptRef = usePromptRef()
   const session = createMemo(() => data.session.get(route.sessionID))
   const messages = () => data.session.message.list(route.sessionID)
+  /**
+   * User inputs admitted but not yet promoted, oldest first — the messages an
+   * unsend can still catch. Synthetics are excluded: they carry no prompt text
+   * to hand back to the input box.
+   */
+  const queuedInputs = createMemo(() =>
+    messages().filter(
+      (message): message is SessionMessageUser =>
+        message.type === "user" && data.session.input.has(route.sessionID, message.id),
+    ),
+  )
   const currentLocation = useLocation()
   const location = createMemo(() => session()?.location ?? currentLocation.ref)
 
@@ -673,6 +685,36 @@ export function Session() {
       enabled: false,
       slash: { name: "unshare" },
       run: () => unavailable("Unsharing"),
+    },
+    {
+      title: "Unsend queued message",
+      id: "session.unqueue",
+      group: "Session",
+      slash: { name: "unqueue" },
+      enabled: queuedInputs().length > 0,
+      run: () => {
+        // Newest first: there is no transcript cursor to point at a specific
+        // row, so repeated invocations pop back through the queue.
+        const message = queuedInputs().at(-1)
+        if (!message) {
+          toast.show({ message: "Nothing queued", variant: "error", duration: 3000 })
+          dialog.clear()
+          return
+        }
+        void (async () => {
+          const result = await unqueue(client.api, { sessionID: route.sessionID, messageID: message.id })
+          if (result.type === "revoked")
+            prompt()?.set({
+              ...projectedPromptInput(message),
+              pasted: [],
+            })
+          if (result.type === "promoted")
+            toast.show({ message: "Already sent", variant: "warning", duration: 3000 })
+          if (result.type === "failed")
+            toast.show({ message: errorMessage(result.error), variant: "error", duration: 5000 })
+          dialog.clear()
+        })()
+      },
     },
     {
       title: "Undo previous message",
