@@ -11,15 +11,16 @@ The fork's own commits are the contiguous run at the tip of the branch —
 everything below them is upstream — so the base is the parent of the oldest fork
 commit, and `git merge-base HEAD v2` finds it. No sha is recorded here on
 purpose: a literal one rots silently, while the derivation is self-checking.
-Sanity check it by size — against the correct base the fork is roughly 97 files
-and 7.6k insertions. If a diff reports hundreds of files, the base is wrong, not
+Sanity check it by size — against the correct base the fork is roughly 100 files
+and 7.7k insertions. If a diff reports hundreds of files, the base is wrong, not
 the fork.
 
 Entries are grouped by the surface they touch. **Item numbers are permanent
 IDs, not an ordering** — they were assigned in the order the changes landed and
 never change, so a number stays valid in commit messages and cross-references
-even as entries are regrouped. Numbers 14–17 are plain upstream bug fixes rather
-than seams, and 21 is fork-local tooling; each lives in its own section.
+even as entries are regrouped, and gaps in the sequence are expected. Numbers
+15–17 are plain upstream bug fixes rather than seams, and 21 is fork-local
+tooling; each lives in its own section.
 
 Each entry carries the same fields:
 
@@ -44,17 +45,19 @@ Each entry carries the same fields:
 | 9 | `session.sidebar.child` + child sidebar | slot gate + behavior | subagent-navigation |
 | 19 | `sidebar.footer.leading` | slot mount | git-branch |
 | 20 | `home.footer.directory.trailing` | slot mount | git-branch |
-| 10 | `session.prompt.hidden` + `app.bottom.hidden` | slot gate + behavior | focus-mode |
+| 10 | `app.bottom` + `session.prompt.hidden` / `app.bottom.hidden` | slot mount + gates | focus-mode |
 | 5 | `context.terminal` focus API | context API | attention-notifications, terminal-status, provider-usage |
-| 6 | `context.attention` + terminal-title decorations | context API | attention-notifications, terminal-status |
+| 6 | `attention.soundboard` + terminal-title decorations | context API | attention-notifications, terminal-status |
 | 7 | Clipboard/selection + alternate-copy transforms | context API | markdown-copy |
 | 8 | Plugin RPC endpoint | backend seam | provider-usage |
-| 11 | Shared framework runtime | loader seam | every rendering plugin |
 | 12 | `prompt.location` / `prompt.palette` | config option | *`cli.json` only* |
+
+Every fork slot name is declared in the `SlotMap` in
+`packages/plugin/src/tui/context.ts`; see [the typed slot
+registry](#the-typed-slot-registry).
 
 Upstream fixes:
 
-- [14 — `fs.watch` fallback](#14-fswatch-fallback-when-the-native-watcher-is-unavailable)
 - [15 — turn wall-clock duration](#15-turn-wall-clock-duration-in-the-assistant-footer)
 - [16 — catalog-aware session restore](#16-session-agentmodel-restore-waits-for-the-catalog)
 - [17 — selection copy blank rows](#17-selection-copy-preserves-blank-layout-rows)
@@ -75,6 +78,35 @@ Fork tooling:
 
 - [21 — `build-custom.sh`](#21-build-customsh-versioned-local-builds)
 
+## The typed slot registry
+
+Slot names used to be free strings: `UI.slot` took `(name: string, render:
+Slot)` and `PluginSlot` took an optional `Record<string, any>` input. Upstream
+has since made both generic over a `SlotMap` interface
+(`packages/plugin/src/tui/context.ts`), so a name that is not a key of that map
+does not compile, and each name's input object is checked at the mount and at
+the plugin's `context.ui.slot` call.
+
+Two consequences for this fork, both structural rather than per-entry:
+
+- **Every fork slot is an entry in `SlotMap`.** That block is the single largest
+  contiguous fork edit outside a new file, and it is where a rebase should look
+  first if a slot stops resolving. The inputs there are the same objects the
+  entries below document, so the map and the entries have to be changed
+  together.
+- **Every `PluginSlot` mount passes `input` and `mode`.** `mode` is `"all"`
+  (render every registration, the old behavior, what all fork mounts use) or
+  `"replace"` (last registration wins). A missing `mode` is a type error, so
+  this cannot be silently lost.
+
+Upstream also pruned its own slot vocabulary, and `app.bottom` went with it —
+so that slot is now the fork's (item 10) rather than something item 10 merely
+gates.
+
+The theme tokens several slots hand out are typed as a shared `SlotTheme`
+(`text`, `textSubdued`, `accent`); slots wanting more than those three
+(items 4 and 13) spell their shape out inline.
+
 ## The slot-presence gate
 
 Items 4, 9, and 10 share one pattern, described here once. A slot registration
@@ -92,6 +124,31 @@ verbatim and merges re-anchor cleanly.
 ## Seams
 
 ### Prompt row
+
+Upstream has since moved the row's right-hand content — the subagent/shell
+counts, the context and cost reading, and the agents/commands hints — out of
+`component/prompt/index.tsx` and into a built-in feature plugin,
+`packages/tui/src/feature-plugins/prompt/footer.tsx`, mounted on upstream's own
+`prompt.footer.end` slot with `mode="replace"`. The Prompt still owns the row
+itself and the location label; everything past them is that plugin's.
+
+This split the fork's prompt-row entries in two. Items 1 and 18 stayed in the
+Prompt, because they bracket the whole row. Items 12 (`prompt.palette`) and 13
+moved into the feature plugin, because the content they modify moved there. That
+is also why `PromptFooter` reaches for `useConfigOptional()` and
+`useOptionalPlugin()` rather than the throwing variants: upstream renders it
+directly in `test/feature-plugins/prompt-footer.test.tsx` with no provider tree,
+and the optional reads let both entries degrade to upstream behavior there
+instead of crashing an upstream test.
+
+A built-in feature plugin importing the plugin context also introduced an import
+cycle — `plugin/context.tsx` imports `plugin/builtins.ts`, which imports the
+feature plugin back. Evaluating the builtins array eagerly then reads a
+still-uninitialized export whenever the feature plugin is the entry point (a
+test importing it directly). `builtins` is therefore a function rather than an
+array, which defers the dereference past module evaluation. That is a two-line
+fork edit in `plugin/builtins.ts` plus its one call site; upstream adding a
+built-in merges cleanly through it.
 
 #### 1. `session.prompt.footer.leading` slot
 
@@ -116,7 +173,10 @@ routes.
 working-directory label.
 
 **Rebase:** a one-line-ish mount plus a small input object, inside the `Prompt`
-component. Conflicts, if any, are trivial.
+component. Conflicts, if any, are trivial. The input object is declared after the
+Prompt's `store`, because its getters read `store.mode` and the theme tokens;
+upstream moves those declarations around, so re-anchor on them rather than on a
+line position.
 
 #### 18. `session.prompt.footer.trailing` slot
 
@@ -124,8 +184,9 @@ component. Conflicts, if any, are trivial.
 `packages/tui/src/routes/session/index.tsx`
 
 **What:** A V2 `PluginSlot` mounted at the *end* of the Prompt's bottom row,
-past the agents/commands hints — the mirror of item 1, which mounts at that
-row's start. Slot input is a stable object with reactive getters:
+past upstream's `prompt.footer.end` mount and so past the agents/commands hints
+that plugin draws — the mirror of item 1, which mounts at that row's start. Slot
+input is a stable object with reactive getters:
 `{ sessionID?, status: "idle" | "running", mode: "normal" | "shell",
 sidebar?: boolean, theme }`, where `theme` exposes `text`, `textSubdued`, and
 `accent`. Empty when unregistered, so it costs no layout for users without such
@@ -148,46 +209,53 @@ the two from disagreeing after a keyboard toggle, a wide-terminal auto-open, or
 a focus-mode collapse.
 
 **Invariant:** renders at the end of the Prompt's bottom row, after core's own
-hints.
+hints — which now means after the `prompt.footer.end` mount, not after inline
+JSX. Anchor on that slot, since the hints themselves are no longer in this file.
 
 **Rebase:** same shape as item 1, plus a `sidebar` prop passed from the session
-route's `Prompt` element, next to the `right=` prop upstream already passes
-there.
+route's `Prompt` element. That element no longer carries a `right=` prop
+(upstream dropped it along with the legacy `session_prompt_right` runtime), so
+`sidebar` is the only fork prop there.
 
 #### 2. `session.prompt.right` slot
 
 **Files:** `packages/tui/src/component/prompt/index.tsx`
 
-**What:** A V2 `PluginSlot` rendered next to the legacy `session_prompt_right`
-slot in the Prompt's `right` cluster (the TPS/AVG/TTFT area), with
-`{ sessionID }` input. Mounted inside the `Prompt` component (next to the
-`props.right` render), not in the session route, so the route's `right=` prop
-stays byte-for-byte upstream.
+**What:** A V2 `PluginSlot` rendered in the Prompt's `right` cluster (the
+TPS/AVG/TTFT area), next to the `props.right` render, with `{ sessionID? }`
+input. Mounted inside the `Prompt` component, not in the session route.
 
-**Why:** The legacy slot API (`session_prompt_right`) is not reachable from
-the current V2 plugin runtime — the legacy `TuiPluginRuntime` is never
-initialized by the v2 CLI, so nothing can register into it. This exposes the
-same position through the V2 `context.ui.slot` registry.
+**Why:** This position used to be the legacy `session_prompt_right` slot, which
+the V2 plugin runtime could not reach — the legacy `TuiPluginRuntime` was never
+initialized by the v2 CLI, so nothing could register into it. Upstream has since
+deleted that runtime and every legacy mount, including the session route's
+`right=` prop, so the position now exists *only* through this entry.
 
-**Invariant:** exposes the legacy `session_prompt_right` position through the V2
-registry, without touching the route's `right=` prop.
+**Invariant:** exposes the `right` cluster position through the V2 registry.
 
-**Rebase:** trivial mount inside the `Prompt` component.
+**Rebase:** trivial mount inside the `Prompt` component. `PromptProps.right`
+itself survives upstream but no route passes it any more, so the cluster is empty
+without a plugin.
 
 **Note:** no plugin in the suite registers this slot yet. It is the cheapest
-entry to drop if the fork is ever trimmed to what is actually consumed.
+entry to drop if the fork is ever trimmed to what is actually consumed — more so
+now that nothing upstream renders beside it.
 
 #### 13. `session.prompt.context` replacement slot
 
-**Files:** `packages/tui/src/component/prompt/index.tsx`,
-`packages/tui/src/util/session.ts`
+**Files:** `packages/tui/src/feature-plugins/prompt/footer.tsx`,
+`packages/tui/src/util/session.ts`, `packages/tui/src/plugin/context.tsx`
 
 **What:** An inline V2 `PluginSlot` mounted in place of the built-in prompt
 context value (`9.0K (1%)`). When no plugin registers the slot, the built-in
 span renders unchanged. Slot input is a stable object with reactive getters:
-`{ sessionID?, tokens?, percent?, text?, updatedAt?, theme }`; `theme` exposes
-`textSubdued` and `error`. Core continues to own the surrounding live-work
-status, separators, cost, truncation, and empty-state behavior.
+`{ sessionID?, tokens?, percent?, text?, cost?, updatedAt?, theme }`; `theme`
+exposes `textSubdued` and `error`. Core continues to own the surrounding
+live-work status, separators, truncation, and empty-state behavior.
+
+The reading and its cost are joined by core into one string, so the slot covers
+both — hence `cost` in the input rather than a cost span core keeps drawing
+beside a replaced context span.
 
 **Why:** Context presentation policy can depend on information outside core,
 such as provider-specific cache assumptions. A replacement seam lets a plugin
@@ -195,11 +263,20 @@ style or annotate the existing value without duplicating the complete status
 cluster or embedding that policy in the fork. `updatedAt` is the creation time
 of the assistant message supplying the displayed usage.
 
-**Invariant:** the slot replaces only the built-in context span; the surrounding
-separator and cost branches stay core's, so plugins own the context rendering
-and not the complete status cluster.
+**Invariant:** the slot replaces only the context/cost reading; the live-work
+counts, the separators around them, and the hint fallback when the reading is
+empty stay core's, so plugins own the reading and not the complete status
+cluster.
 
-**Rebase:** contained to the context span; preserve the surrounding branches.
+**Rebase:** this now lives in the built-in prompt-footer plugin rather than the
+Prompt (see [the prompt-row note](#prompt-row)). Upstream's `status()` memo there
+returns a filtered array joined with `" · "`; the fork splits it into a `usage()`
+memo carrying the raw `contextUsage` result plus its formatted halves, so the
+slot input has `tokens`/`percent`/`updatedAt` to hand out. Preserve that split —
+re-collapsing it to the joined array silently drops the numeric fields while
+still compiling, since they are all optional. The `updatedAt` field on
+`contextUsage` (in `util/session.ts`) is a one-line addition guarded by
+`test/util/session.test.ts`.
 
 ### Prompt body
 
@@ -401,39 +478,56 @@ that had none.
 
 ### Session-wide gates
 
-#### 10. `session.prompt.hidden` + `app.bottom.hidden` slots + focus (read-only) mode
+#### 10. `app.bottom` slot + `session.prompt.hidden` / `app.bottom.hidden` gates + focus (read-only) mode
 
 **Files:** `packages/tui/src/routes/session/index.tsx`,
 `packages/tui/src/app.tsx`
 
-**What:** Two presence-only V2 slot gates following the pattern of items 4
-and 9.
+**What:** The `app.bottom` slot, plus two presence-only V2 slot gates following
+the pattern of items 4 and 9.
 
+- `app.bottom` itself: a full-width row mounted below every route in `app.tsx`,
+  above upstream's own `app` slot. This *was* upstream's, and the gate below was
+  all this entry owned; upstream has since pruned its slot vocabulary and deleted
+  it, so the fork now carries the mount as well. One plugin uses it:
+  `provider-usage` mounts its `/usage` output there — a status line while
+  refreshing, then the per-window detail table, cleared after fifteen seconds.
+  Its persistent usage bars are *not* here; those are item 1's slot, inside the
+  Prompt.
+
+  It is fair to ask why this cannot just be upstream's `app` slot, given the two
+  render adjacently in the same column. Because `app` is what every plugin
+  needing a live reactive owner registers into — five plugins in the suite plus
+  three upstream feature plugins host their keymap registrations there, rendering
+  nothing. Gating `app` the way `app.bottom.hidden` gates `app.bottom` would
+  unmount all of them and take their keybindings with it. The gateable visible
+  region has to be a different slot from the always-mounted owner host.
 - `promptHidden = plugins.slot("session.prompt.hidden").length > 0` (in the
   session route). While at least one active plugin registers this slot, every
-  input surface — the `session.composer.top` slot, the Composer, and the Prompt
-  — is gated off so the transcript scrollbox reclaims the full height, turning
-  the session into a read-only output view. The wrapping `<box flexShrink={0}>`
-  stays mounted (an empty flexShrink box is zero rows), so the gate is expressed
-  as per-surface `!promptHidden()` terms rather than an outer wrapper — this
-  keeps the box at upstream's indentation and avoids re-indenting the whole
-  cluster.
+  input surface — the Composer and the Prompt — is gated off so the transcript
+  scrollbox reclaims the full height, turning the session into a read-only output
+  view. (Upstream's `session.composer.top` slot was a third surface here until
+  upstream removed it.) The wrapping `<box flexShrink={0}>` is itself dropped
+  while hidden — an empty box would still be a flex child, so the parent's
+  `gap={1}` would leave a blank row above the `paddingBottom` one — and
+  `paddingBottom` collapses to `0`, leaving exactly one blank row below the
+  transcript.
 - `appBottomHidden = plugins.slot("app.bottom.hidden").length > 0` (in
-  `app.tsx`), wrapping `<PluginSlot name="app.bottom" />` in
-  `Show when={!appBottomHidden()}`. The `app.bottom` slot lives at the App
-  level, above the session route, so a route-scoped gate cannot reach it — hence
-  a distinct gate in `app.tsx`. This lets a read-only view reclaim the bottom
-  status region (e.g. the provider-usage bars) along with the input cluster; the
-  `focus-mode` plugin registers both slots together.
+  `app.tsx`), wrapping the `app.bottom` mount in `Show when={!appBottomHidden()}`.
+  `app.bottom` lives at the App level, above the session route, so a route-scoped
+  gate cannot reach it — hence a distinct gate in `app.tsx`. This lets a read-only
+  view reclaim the bottom region along with the input cluster; the `focus-mode`
+  plugin registers both slots together.
 
 Two deliberate asymmetries, both in the route:
 
 - **Required input still shows.** The permission and form `<Match>` branches
   carry no `promptHidden` term, so a pending permission or form prompt renders
-  through the existing `<Switch>` even in focus mode; only the composer trio
-  (behind `Show when={!promptHidden()}`) and the plain Prompt `<Match>` (gated
-  `!promptHidden() && !disabled()`) drop out. Focus mode never swallows a prompt
-  the user has to answer.
+  through the existing `<Switch>` even in focus mode; only the Composer (behind
+  `Show when={!promptHidden()}`) and the plain Prompt `<Match>` (gated
+  `!promptHidden() && !disabled()`) drop out. The wrapper itself is kept while
+  `disabled()`, which is what lets those branches render at all. Focus mode never
+  swallows a prompt the user has to answer.
 - **Sidebar close is one-way.** A `createEffect(on(promptHidden, …))` closes the
   sidebar on the false→true transition if it is visible, and never reopens it on
   show. It calls the shared `setSidebar(false)` helper (config
@@ -453,25 +547,34 @@ plugin that just registers/unregisters the slots.
 composer trio and the plain Prompt, but leave the permission/form branches alone
 so required input still renders.
 
-**Rebase:** leaves the `<box flexShrink={0}>` at upstream indentation; the gate
-is three small edits inside it — a `Show when={!promptHidden()}` around the
-composer trio, a leading `!promptHidden() &&` on the `<Switch>`'s first
-`<Match>`, and a `!promptHidden() &&` on the last `<Match when={!disabled()}>`
-(both upstream expressions kept verbatim after the added term). The
-`promptHidden` memo and the sidebar-coupling effect are purely additive. The
-`app.bottom.hidden` gate is one `createMemo` plus a `Show` wrapper in `app.tsx`.
+**Rebase:** the gate is a `Show when={!promptHidden() || disabled()}` around the
+input cluster's `<box flexShrink={0}>`, a `Show when={!promptHidden()}` around the
+Composer, a leading `!promptHidden() &&` on the `<Switch>`'s first `<Match>`, and
+a `!promptHidden() &&` on the last `<Match when={!disabled()}>` — upstream
+expressions kept verbatim after the added term, so they re-anchor cleanly. The
+`promptHidden` memo and the sidebar-coupling effect are purely additive. In
+`app.tsx` it is one `createMemo` plus the `Show`-wrapped `app.bottom` mount,
+which the fork now owns outright.
 
 ### Plugin context
 
 Items 5, 6, and 7 center on one new provider file
 (`packages/tui/src/context/terminal.tsx`) mounted around `PluginProvider`, plus
 new fields on the V2 plugin context type
-(`packages/plugin/src/v2/tui/context.ts`, `packages/tui/src/plugin/context.tsx`).
+(`packages/plugin/src/tui/context.ts`, `packages/tui/src/plugin/context.tsx`).
+
+Note the plugin package's paths moved: upstream promoted `packages/plugin/src/v2/**`
+to `packages/plugin/src/**` and demoted the old V1 API to `packages/plugin/src/v1/**`.
+The import that catches this is `@opencode-ai/plugin/tui`, which now resolves to
+the *V2* TUI module — V1's types (`TuiAttention*`, `TuiThemeCurrent`) live at
+`@opencode-ai/plugin/v1/tui`. Fork files reaching for a V1 type through the old
+specifier fail to compile rather than resolving to something plausible, which is
+the good case; the bad case would have been a name that exists in both.
 
 #### 5. `context.terminal` focus API (V2 TUI plugins)
 
 **Files:** `packages/tui/src/context/terminal.tsx` (new),
-`packages/tui/src/plugin/context.tsx`, `packages/plugin/src/v2/tui/context.ts`,
+`packages/tui/src/plugin/context.tsx`, `packages/plugin/src/tui/context.ts`,
 `packages/tui/src/app.tsx` (provider mount)
 
 **What:** New `TerminalProvider` tracks renderer `focus`/`blur` events into a
@@ -489,18 +592,24 @@ exposed them to V2 plugins.
 
 **Rebase:** additive — a new provider file plus context-type fields.
 
-#### 6. `context.attention` + terminal-title decorations
+#### 6. `attention.soundboard` + terminal-title decorations
 
 **Files:** same as item 5
 
-**What:** Two APIs sharing the `TerminalProvider` wiring:
+**What:** Two APIs, one on the plugin context type and one on the
+`TerminalProvider` wiring:
 
-- The existing but dormant attention host (`packages/tui/src/attention.ts`,
-  sound packs + notifications + focus policies) is now instantiated in the v2
-  app and exposed as `context.attention` (`notify`, `soundboard`). The TUI
-  config already parsed and resolved the `attention` section; it was simply
-  never wired. Note: `attention.enabled` defaults to `false` upstream, so
-  sounds require opting in via `cli.json`.
+- `context.attention.soundboard`. **Upstream has since shipped the attention
+  host itself** — `packages/tui/src/context/attention.tsx` instantiates
+  `createTuiAttention`, and `context.attention.notify` is upstream's — so all
+  this entry still adds is the sound-pack registry, which upstream's `Attention`
+  interface omits even though the object behind it has one. The fork widens that
+  interface with `soundboard` and wraps the host in `plugin/context.tsx` rather
+  than passing it through, so a registered pack is unregistered when the owning
+  plugin unloads. `attention-notifications` calls
+  `context.attention.soundboard.activate(...)`, so dropping it would break that
+  plugin. Note: `attention.enabled` defaults to `false` upstream, so sounds
+  require opting in via `cli.json`.
 - Terminal-title decorations. Plugins call
   `context.terminal.title.decorate({ id, priority, prefix?, suffix? })`.
   `TerminalProvider` wraps `renderer.setTerminalTitle` on mount (restoring it on
@@ -513,9 +622,10 @@ exposed them to V2 plugins.
   resurrect a title the app removed.
 
 **Why:** In the v2 binary the legacy TUI plugin runtime (which exposed
-`api.attention` and raw renderer access) is dead code — the v2 CLI never
-initializes it, so the v2 TUI shipped with no notification sounds at all and
-no safe way for plugins to touch the terminal title. Raw
+`api.attention` and raw renderer access) was dead code — the v2 CLI never
+initialized it, so the v2 TUI shipped with no notification sounds at all and
+no safe way for plugins to touch the terminal title. Upstream has since answered
+the first half; the second is still only here. Raw
 `renderer.setTerminalTitle()` writes from plugins would race the app's own
 reactive title effect; the decoration registry removes that race by
 construction.
@@ -525,7 +635,14 @@ decorations are applied by wrapping `setTerminalTitle` inside `TerminalProvider`
 not by rewriting the app's title effect into `base + compose()`. That is what
 keeps this hot file free of a title-decoration diff.
 
-**Rebase:** additive, in the same provider file as item 5.
+**Rebase:** the title half is additive, in the same provider file as item 5.
+`TerminalProvider` must **not** construct its own `createTuiAttention` — upstream's
+`AttentionProvider` already mounts one, and a second host would mean two focus
+gates and two sound pipelines off the same config. `TerminalProvider` therefore
+nests inside `AttentionProvider` in `app.tsx` and carries no attention of its own.
+
+**Drop when:** upstream puts `soundboard` on its own `Attention` interface, at
+which point only the title decorations remain and this entry merges into item 5.
 
 #### 7. Clipboard/selection context + alternate-copy transforms
 
@@ -589,7 +706,7 @@ from `@opencode-ai/util/effect/app-node`, which upstream extracted out of
 `packages/core/src/effect/`),
 `packages/protocol/src/groups/plugin.ts`, `packages/protocol/src/errors.ts`,
 `packages/server/src/handlers/plugin.ts`, `packages/core/src/plugin/{host,promise}.ts`,
-`packages/core/src/location-services.ts`, `packages/plugin/src/v2/{effect,promise}/rpc.ts`,
+`packages/core/src/location-services.ts`, `packages/plugin/src/{effect,promise}/rpc.ts`,
 and regenerated `packages/client/src/**`
 
 **What:** A generic request channel from any OpenCode client to server
@@ -600,7 +717,7 @@ plugins:
   owning plugin removes its handlers; duplicate registration is a defect.
 - Server-plugin context gains `context.rpc.register(method, handler)` and
   `context.rpc.call(method, payload)` in both the effect and promise APIs
-  (`packages/plugin/src/v2/{effect,promise}/rpc.ts`, host wiring in
+  (`packages/plugin/src/{effect,promise}/rpc.ts`, host wiring in
   `packages/core/src/plugin/host.ts`, promise adapter in
   `packages/core/src/plugin/promise.ts`).
 - Protocol endpoint `POST /api/plugin/rpc/:method`
@@ -634,63 +751,13 @@ handler) plus regenerated client output — **rerun `bun run generate` in
 `packages/client` after rebasing instead of resolving conflicts in
 `packages/client/src/**`.**
 
-### Loader
-
-#### 11. Shared framework runtime for rendering plugins
-
-**Files:** `packages/tui/src/plugin/context.tsx`
-
-**What:** At the top of the V2 plugin loader module, the host calls
-`ensureRuntimePluginSupport()` from
-`@opentui/solid/runtime-plugin-support/configure` — once, before any plugin is
-imported. This is the same primitive the V1 TUI plugin runtime
-(`packages/opencode/src/plugin/tui/runtime.ts`) already uses; the V2 loader is a
-separate boot path that never initializes that runtime, so it must make the call
-itself. It is called with no `additional` modules: the V2 plugins reach
-keybindings through the host `context.keymap` API and never import
-`@opentui/keymap` themselves, so only the default set needs sharing (importing a
-second `@opentui/keymap` subpath here also collides its pre-bundled chunk during
-`bun build --compile`).
-
-**Why:** A TUI plugin is a *rendering* plugin — it ships SolidJS components that
-mount into the host's live `@opentui` renderer. `solid-js`, `@opentui/core`, and
-`@opentui/solid` keep critical state in module-level singletons: `solid-js`
-tracks the current reactive owner/listener, `@opentui/core` owns the renderer,
-`@opentui/solid` is the reconciler bridging them. A second copy of any of them
-gives the plugin its own reactive graph, so signals/effects it creates are
-invisible to the host renderer — renderables never mount, effects never fire, or
-it crashes.
-
-`ensureRuntimePluginSupport` captures the host's already-loaded runtime module
-namespaces (solid, solid/store, the JSX runtimes, `@opentui/core`, and
-`@opentui/solid`) and registers a `Bun.plugin` whose `onLoad` returns those live
-objects for a plugin's bare `solid-js` / `@opentui/*` imports. Because it hands
-back the in-memory module — not a filesystem path — it dedupes to the host
-instance regardless of where the plugin loads from (an arbitrary directory or
-the isolated package cache) and regardless of whether the plugin brought its own
-on-disk copy. Crucially it resolves *nothing from disk*, so it works in a
-`bun build --compile` binary where those packages live only inside the
-executable and cannot be linked or walked up to. It also needs no writes into
-plugin directories.
-
-**Invariant:** the plugin must import the *same instances* of the framework
-modules as the host, not compatible copies.
-
-**Rebase:** confined to the V2 plugin loader module — one import and a single
-top-level call. Everything is additive; no upstream logic is edited. Depends on
-`@opentui/solid` exposing `runtime-plugin-support/configure`; revisit if the
-`@opentui` major changes.
-
-**Drop when:** upstream ships its own V2 rendering-plugin loader with
-runtime-plugin-support already wired. The primitive is idempotent
-(global-symbol guard), so a duplicate call is harmless in the meantime.
-
 ### Config
 
 #### 12. `prompt.location` / `prompt.palette` config options
 
 **Files:** `packages/tui/src/config/index.tsx`,
-`packages/tui/src/component/prompt/index.tsx`
+`packages/tui/src/component/prompt/index.tsx`,
+`packages/tui/src/feature-plugins/prompt/footer.tsx`
 
 **What:** Two new optional booleans in the TUI config's `prompt` section,
 set in `cli.json`. `prompt.location: false` suppresses the working-directory
@@ -699,6 +766,10 @@ label that the Prompt renders in its footer row while the session is idle
 shortcut hint (`ctrl+p commands`) in the same row's right cluster (normal mode
 only; the shell-mode `esc exit shell mode` hint is unaffected). Unset or `true`
 keeps upstream behavior for each.
+
+The two halves no longer live in the same file: the label is still the Prompt's,
+but the hint moved into the built-in prompt-footer plugin (see [the prompt-row
+note](#prompt-row)).
 
 **Why:** The directory label repeats information already visible elsewhere
 (terminal title, shell prompt), and the palette hint is static muscle-memory
@@ -713,47 +784,17 @@ renders.
 
 **Rebase:** two optional fields appended to the `prompt` struct in the TUI config
 schema, an early-return line at the top of the `locationLabel` memo, and a
-`<Show when={config.prompt?.palette !== false}>` wrapper around the palette-hint
-`<text>` in the footer's normal-mode branch. All should merge cleanly.
+`<Show when={config?.data.prompt?.palette !== false}>` wrapper around the
+palette-hint `<text>` in the feature plugin's normal-mode branch. The `?.` is
+load-bearing: that component reads config through `useConfigOptional()` so it
+still renders in upstream's provider-less test, and an absent provider has to
+mean "upstream behavior", not "hidden".
 
 ## Upstream fixes
 
 These are not extension seams — they are plain fixes carried on top of upstream,
 and each should be dropped the moment upstream fixes it. No plugin consumes any
 of them.
-
-#### 14. `fs.watch` fallback when the native watcher is unavailable
-
-**Files:** `packages/core/src/filesystem/watcher.ts`
-
-**What:** `subscribeDirectory` no longer gives up when the `@parcel/watcher`
-native binding or the platform backend is missing. Instead of logging an error
-and returning no subscription, it logs a warning and falls back to Node's
-non-recursive `fs.watch` on the directory, publishing normalized
-`{ path, type: "update" }` events into the same pubsub the Parcel path uses.
-Error logging and the `unsubscribe` shape match the existing file-watch branch,
-so the rest of the service (ref counting, finalizers, stream wiring) is
-untouched. The native watcher stays preferred whenever it loads — it is the only
-path with recursive watching and `ignore` support; the fallback only covers
-directly watched files and directories.
-
-**Why:** In the compiled Bun executable the platform-specific binding is loaded
-through `createRequire(import.meta.url)`, which does not guarantee that
-`watcher.node` is embedded in the artifact. The resulting throw is swallowed by
-the optional loader (`lazy(... catch { return })`), leaving the watcher service
-with no directory backend at all. The visible symptom is that config hot reload
-dies: edits to `opencode.json` are not picked up until the background service
-restarts. The fallback restores that reload path in compiled builds.
-
-**Invariant:** a missing native binding or unsupported backend must still yield a
-working subscription object rather than `undefined`, so the caller registers an
-entry and hot reload keeps working.
-
-**Rebase:** replaces the early-out branch at the top of `subscribeDirectory`;
-everything below it (the Parcel subscribe path) is untouched.
-
-**Drop when:** upstream makes the binding load reliably under
-`bun build --compile`.
 
 #### 15. Turn wall-clock duration in the assistant footer
 
@@ -955,6 +996,13 @@ place this entry edits existing upstream rendering; if upstream restructures
 diff. The sibling assistant-footer `<Show>` has the same unkeyed shape and is
 deliberately untouched.
 
+Sitting beside those siblings is also what makes this entry's *silent* failure
+mode: `revoke` and `projectRevoked` take the same event-bus argument `admit` and
+`promote` do, so a rename there (`events` → `bus`, `EventV2` → `Bus`) leaves the
+fork's copies referring to a name that no longer exists. It does not conflict —
+it fails to compile, which is the cheap version. Whenever this entry's hunks look
+untouched after a rebase, check them against the sibling immediately above.
+
 **Drop when:** upstream ships input revocation of its own. The keyed `<Show>`
 can go the moment upstream keys it, independently of the rest.
 
@@ -1134,7 +1182,10 @@ construction plus disposal in the lifecycle. The mapping and the alert policy
 live in the new file. The lifecycle import is dynamic and gated on
 `attention.enabled`: the sound module resolves its assets at import time, so a
 static import would turn a missing audio asset into a mini startup failure for
-everyone rather than an absent chime for the few who switched it on.
+everyone rather than an absent chime for the few who switched it on. The sound
+names come from the V1 plugin types, so the import is
+`@opencode-ai/plugin/v1/tui` — `@opencode-ai/plugin/tui` is the V2 module and
+does not carry them (item 30 has the same dependency for `TuiThemeCurrent`).
 
 **Drop when:** mini grows a plugin host that `attention-notifications` can
 target.
@@ -1552,11 +1603,9 @@ fork(7)        7                                  after mounts (needs 5)
 fork(12,13)    12, 13
 fork(8)        8
 fork(4)        4                                  after mounts (needs 10's terms)
-fork(11)       11        ┐
-fork(17)       17        │ each carries a "Drop when", so they sit
-fork(14)       14        │ nearest the tip where --onto can lift them
-fork(15)       15        │ out without disturbing anything below
-fork(16)       16        ┘
+fork(17)       17        ┐ each carries a "Drop when", so they sit
+fork(15)       15        │ nearest the tip where --onto can lift them
+fork(16)       16        ┘ out without disturbing anything below
 fork(22)       22                                 new file + additive call sites
 fork(23)       23                                 new file + additive call sites
 fork(24)       24                                 new file + additive call sites
@@ -1596,11 +1645,13 @@ Read these first — they carry the most diff and will conflict soonest.
 
 | File | Entries |
 | --- | --- |
-| `packages/tui/src/component/prompt/index.tsx` | 1, 2, 4, 12, 13, 16, 18 |
+| `packages/plugin/src/tui/context.ts` | every slot entry, plus 5, 6, 7 |
+| `packages/tui/src/component/prompt/index.tsx` | 1, 2, 4, 12, 16, 18 |
 | `packages/tui/src/routes/session/index.tsx` | 3, 4, 9, 10, 15, 18 |
 | `packages/tui/src/app.tsx` | 5, 6, 7 (provider mount), 10 |
 | `packages/tui/src/context/terminal.tsx` (new) | 5, 6, 7 |
-| `packages/tui/src/plugin/context.tsx` | 5, 6, 7, 11 |
+| `packages/tui/src/plugin/context.tsx` | 6, 7, 13 |
+| `packages/tui/src/feature-plugins/prompt/footer.tsx` | 12, 13 |
 | `packages/tui/src/routes/session/sidebar.tsx` | 9, 19 |
 | `packages/tui/src/util/selection.ts` | 7, 17 |
 | `packages/tui/src/mini/runtime.lifecycle.ts` | 22, 24, 25, 26, 30 |
@@ -1620,26 +1671,36 @@ condition edited inside upstream's own expression.
 
 ### Known upstream collisions
 
-- Upstream has since grown its own session-route slots: `session.header` (top of
-  the session view) and `session.composer.top` (directly above the Composer).
-  Neither overlaps this fork's names, but `session.composer.top` is mounted on
-  the line immediately above the Composer `open` prop that item 4 edits, and
-  upstream's `PluginSlot` import in the session route duplicates the one item 4
-  adds — expect adjacent-line conflicts or a duplicate-import auto-merge there.
-- `packages/client/src/**` is generated. After rebasing item 8, rerun
+- **Upstream's slot vocabulary is not stable, in either direction.** It has both
+  added names (`prompt.footer.end`) and deleted them (`app.bottom`,
+  `home.bottom`, `session.header`, `session.composer.top`). A deleted name that
+  this fork mounts or gates becomes the fork's to carry — that is how item 10
+  acquired the `app.bottom` mount. Now that `SlotMap` is typed, a name upstream
+  removes fails to compile rather than silently rendering nothing.
+- `packages/client/src/**` is generated. After rebasing items 8 or 33, rerun
   `bun run generate` in `packages/client` rather than resolving conflicts by
-  hand.
+  hand — `git checkout --ours` those paths first, then regenerate, then `git add`.
 - **Theme token reads will not conflict, but they do break.** Items 4, 13, 18,
-  19, and 20 expose theme tokens to plugins through slot-input getters whose
-  bodies read `themeV2`. Core owns that token shape and has changed it before
-  (callables like `themeV2.text.subdued()` became plain getters
-  `themeV2.text.subdued`, and `hue.accent(500)` became `hue.accent[500]`). Those
-  reads sit in fork-only blocks, so a rebase applies them silently and only the
-  typecheck catches it — after any rebase, grep for `themeV2.<token>(` in
-  `packages/tui/src` and compare against
-  `packages/tui/src/theme/v2/component.ts`. The *plugin-facing* contract is
+  19, and 20 expose theme tokens to plugins through slot-input getters. Core owns
+  that token shape and has changed it repeatedly: callables like
+  `themeV2.text.subdued()` became plain getters, `hue.accent(500)` became
+  `hue.accent[500]`, and the `themeV2` binding itself is now just `theme` (with
+  `useTheme()`/`useThemes()` split apart, and the resolver extracted to the
+  `@opencode-ai/theme` package). Those reads sit in fork-only blocks, so a rebase
+  applies them silently and only the typecheck catches it — after any rebase,
+  grep `packages/tui/src` for `themeV2` and compare surviving reads against
+  `packages/tui/src/theme/component.ts`. The *plugin-facing* contract is
   unaffected: consumers see a getter returning a color either way, so a token
   reshuffle never requires plugin changes.
+- **Feature plugins own more of the UI than they used to.** Upstream keeps moving
+  core rendering out of routes and shared components into built-ins under
+  `packages/tui/src/feature-plugins/`, reached through its own slots. When an
+  entry's anchor disappears from a route, look there before re-deriving from
+  scratch — items 12 and 13 moved to `feature-plugins/prompt/footer.tsx` intact.
+  Two things to carry over when that happens: read host contexts through their
+  optional hooks, since upstream unit-tests these components with no provider
+  tree, and remember that importing `plugin/context` from a built-in closes an
+  import cycle through `plugin/builtins.ts`.
 - **The theme registry's own names move too.** Item 30 imports from
   `packages/tui/src/theme` rather than reading tokens, and upstream's move to
   native v2 themes renamed `ThemeJson` to `ThemeV1Json` and replaced `isTheme`
@@ -1659,7 +1720,17 @@ condition edited inside upstream's own expression.
   `packages/core/test/plugin.test.ts`.
 - TUI: `packages/tui/test/util/selection.test.ts` and
   `packages/tui/test/util/session.test.ts` (items 7 and 13), plus item 17's
-  `selection-text.test.ts` and `selection-text.render.test.ts`.
+  `selection-text.test.ts` and `selection-text.render.test.ts`, and item 33's
+  `test/session/unqueue.test.ts`.
+- **Upstream tests that fork entries must keep passing**, which is a different
+  obligation from the fork's own guards:
+  `packages/tui/test/feature-plugins/prompt-footer.test.tsx` renders the built-in
+  prompt footer with a hand-built context and no provider tree, so items 12 and 13
+  live or die by their optional context reads;
+  `packages/core/test/session-runner.test.ts` holds item 33's seven revoke tests
+  alongside upstream's, so they have to be written against whatever model harness
+  upstream currently uses (`TestLLM.push` / `TestLLM.gate` today, a bare
+  `responses` array before that).
 - Mini: `packages/tui/test/mini/runtime.test.ts` carries items 28 and 29 —
   remembered-model precedence, and the variant surviving a refresh that lands
   before the catalog publishes variants. `packages/tui/test/mini/theme.named.test.ts`
@@ -1689,8 +1760,13 @@ reads as a regression that isn't one.
 | Lint | `bunx oxlint packages/tui/src packages/core/src/plugin` | 0 errors (warnings expected) |
 
 Run `bun install` first after a rebase — upstream adds workspace packages (most
-recently `@opencode-ai/util`), and a stale `node_modules` reports the resulting
+recently `@opencode-ai/theme`), and a stale `node_modules` reports the resulting
 unresolved imports as dozens of unrelated Effect type errors across `core`.
+
+Use the workspace's own checker. `bun turbo typecheck` runs `tsgo`; a bare
+`bunx tsc --noEmit` disagrees with it (it reports errors in files no entry
+touches, such as `component/dialog-move-session.tsx`, and stack-overflows if
+pointed at the repo root). Those are not fork regressions.
 
 The TUI suite includes app-lifecycle tests rendering the new provider stack, the
 RPC register → call → dispose-on-unload test in the core plugin suite, and items
@@ -1699,9 +1775,9 @@ RPC register → call → dispose-on-unload test in the core plugin suite, and i
 
 Known noise, all pre-existing and unrelated to fork changes:
 
-- The TUI suite is **intermittent**: across six full runs (five before this
-  rebase, one after) exactly one reported a single failure that never
-  reproduced. Re-run before treating a lone TUI failure as a regression.
+- The TUI suite is **intermittent**: across seven full runs exactly one reported
+  a single failure that never reproduced. Re-run before treating a lone TUI
+  failure as a regression.
 - `bun turbo typecheck` segfaults intermittently at `--concurrency=3` on WSL2.
   `--concurrency=1` completes reliably; the failure is in turbo itself, not in
   any package's typecheck.
@@ -1714,3 +1790,5 @@ Known noise, all pre-existing and unrelated to fork changes:
 A plugin-less build has no behavior differences from upstream:
 `packages/tui/src/routes/session/composer/index.tsx` is byte-identical to
 upstream, and every gate in items 4, 9, and 10 is inert without a registration.
+The one visible addition without any plugin is item 10's `app.bottom` mount,
+which renders nothing when nothing registers into it.
