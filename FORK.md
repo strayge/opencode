@@ -107,6 +107,13 @@ The theme tokens several slots hand out are typed as a shared `SlotTheme`
 (`text`, `textSubdued`, `accent`); slots wanting more than those three
 (items 4 and 13) spell their shape out inline.
 
+Upstream has since typed `context.theme` as `ResolvedTheme` — it was `any` — and
+now supplies it from `themes.currentTokens()`. That extends the same protection
+one hop further back: the mounts that read tokens *off the plugin context* to
+build a slot input (items 13 and 20) are now checked where they read, not only
+where the result lands in a `SlotMap` entry. A token this fork hands to a slot
+can no longer quietly become `undefined` because upstream moved it.
+
 ## The slot-presence gate
 
 Items 4, 9, and 10 share one pattern, described here once. A slot registration
@@ -590,7 +597,14 @@ exposed them to V2 plugins.
 **Invariant:** focus state is observable to plugins with three values, the third
 (`"unknown"`) distinguishing "not yet reported" from "blurred".
 
-**Rebase:** additive — a new provider file plus context-type fields.
+**Rebase:** additive — a new provider file plus context-type fields. The
+provider *mount* is the exception: `app.tsx`'s stack keeps growing (most
+recently `StorageProvider` and `TuiStartupProvider` above it), and because each
+new wrapper reindents everything below, the conflict presents as the whole
+nesting block rather than one line. Resolve it by taking upstream's tree whole
+and reinserting `<TerminalProvider>` at its one correct depth, then run prettier
+on the file — reading the two sides line by line is wasted effort when the only
+fork content is a single wrapper.
 
 #### 6. `attention.soundboard` + terminal-title decorations
 
@@ -1680,18 +1694,40 @@ condition edited inside upstream's own expression.
 - `packages/client/src/**` is generated. After rebasing items 8 or 33, rerun
   `bun run generate` in `packages/client` rather than resolving conflicts by
   hand — `git checkout --ours` those paths first, then regenerate, then `git add`.
+- **A schema field upstream adds reaches this fork twice, and neither hit
+  conflicts.** When `Project` gained a required `canonical`, the regenerated
+  client changed item 8's `PluginRpcOutput` (caught only by rerunning `generate`)
+  and the fork's *own test fixtures* stopped compiling — upstream updates its
+  fixtures in the same commit, so only the fork's hand-built session literals in
+  `test/mini/runtime.test.ts` were left behind. Both surface at typecheck, so the
+  rule is that a clean rebase is not evidence of a clean tree: regenerate and
+  typecheck before believing it.
+- **The plugin context keeps gaining neighbours.** Upstream has added `storage`
+  and `ui.tabs` to `Context` since the last rebase, both landing in exactly the
+  two spots items 5–7 edit (`plugin/context.tsx`'s hook block and the context
+  literal). These conflict every time and are always a union merge: keep both
+  sides. The one to read rather than union is `theme`/`attention`, where upstream
+  and the fork now write adjacent lines for different reasons — upstream's typed
+  `get theme()` alongside item 6's `attention: attentionApi` wrapper.
 - **Theme token reads will not conflict, but they do break.** Items 4, 13, 18,
   19, and 20 expose theme tokens to plugins through slot-input getters. Core owns
   that token shape and has changed it repeatedly: callables like
   `themeV2.text.subdued()` became plain getters, `hue.accent(500)` became
-  `hue.accent[500]`, and the `themeV2` binding itself is now just `theme` (with
+  `hue.accent[500]`, the `themeV2` binding itself is now just `theme` (with
   `useTheme()`/`useThemes()` split apart, and the resolver extracted to the
-  `@opencode-ai/theme` package). Those reads sit in fork-only blocks, so a rebase
+  `@opencode-ai/theme` package), and most recently `useThemes().contextual(name)`
+  became `useTheme(name)` — the contextual sets now hang off
+  `ComponentTheme.contextual`, with the raw tokens exposed as
+  `themes.currentTokens()`. Those reads sit in fork-only blocks, so a rebase
   applies them silently and only the typecheck catches it — after any rebase,
-  grep `packages/tui/src` for `themeV2` and compare surviving reads against
-  `packages/tui/src/theme/component.ts`. The *plugin-facing* contract is
-  unaffected: consumers see a getter returning a color either way, so a token
-  reshuffle never requires plugin changes.
+  grep `packages/tui/src` for `themeV2` and `contextual(` and compare surviving
+  reads against `packages/tui/src/theme/component.ts`. Note what makes that last
+  rename cost nothing: every fork block reads a `theme` binding that *upstream's
+  own line* establishes, so a change to how the binding is obtained lands in
+  upstream's hunk rather than the fork's. Reads that resolve their own tokens are
+  the ones to check. The *plugin-facing* contract is unaffected: consumers see a
+  getter returning a color either way, so a token reshuffle never requires plugin
+  changes.
 - **Feature plugins own more of the UI than they used to.** Upstream keeps moving
   core rendering out of routes and shared components into built-ins under
   `packages/tui/src/feature-plugins/`, reached through its own slots. When an
