@@ -18,9 +18,11 @@ the fork.
 Entries are grouped by the surface they touch. **Item numbers are permanent
 IDs, not an ordering** — they were assigned in the order the changes landed and
 never change, so a number stays valid in commit messages and cross-references
-even as entries are regrouped, and gaps in the sequence are expected. Numbers
-15–17 are plain upstream bug fixes rather than seams, and 21 is fork-local
-tooling; each lives in its own section.
+even as entries are regrouped. Gaps in the sequence are expected: a retired entry
+leaves its number behind rather than freeing it for reuse, so a number never
+means two different things. Not every entry is a seam — the ones that are plain
+upstream bug fixes, the ones targeting `mini`, and the one that is fork-local
+tooling each live in their own section below.
 
 Each entry carries the same fields:
 
@@ -43,8 +45,7 @@ Each entry carries the same fields:
 | 4 | `session.prompt.below` + child-session steering | slot gate + behavior | subagent-steering |
 | 3 | `session.message.assistant.footer` | slot mount | *none yet* |
 | 9 | `session.sidebar.child` + child sidebar | slot gate + behavior | subagent-navigation |
-| 19 | `sidebar.footer.leading` | slot mount | git-branch |
-| ~~20~~ | ~~`home.footer.directory.trailing`~~ | dropped — [upstream removed the anchor](#20-homefooterdirectorytrailing-slot--dropped) | — |
+| 19 | `sidebar.footer.leading` | slot mount | *none yet* |
 | 10 | `app.bottom` + `session.prompt.hidden` / `app.bottom.hidden` | slot mount + gates | focus-mode |
 | 5 | `context.terminal` focus API | context API | attention-notifications, terminal-status, provider-usage |
 | 6 | `attention.soundboard` + terminal-title decorations | context API | attention-notifications, terminal-status |
@@ -82,12 +83,10 @@ Fork tooling:
 
 ## The typed slot registry
 
-Slot names used to be free strings: `UI.slot` took `(name: string, render:
-Slot)` and `PluginSlot` took an optional `Record<string, any>` input. Upstream
-has since made both generic over a `SlotMap` interface
-(`packages/plugin/src/tui/context.ts`), so a name that is not a key of that map
-does not compile, and each name's input object is checked at the mount and at
-the plugin's `context.ui.slot` call.
+Slot names are typed. `UI.slot` and `PluginSlot` are both generic over a
+`SlotMap` interface (`packages/plugin/src/tui/context.ts`), so a name that is
+not a key of that map does not compile, and each name's input object is checked
+at the mount and at the plugin's `context.ui.slot` call.
 
 Two consequences for this fork, both structural rather than per-entry:
 
@@ -109,12 +108,12 @@ The theme tokens several slots hand out are typed as a shared `SlotTheme`
 (`text`, `textSubdued`, `accent`); slots wanting more than those three
 (items 4 and 13) spell their shape out inline.
 
-Upstream has since typed `context.theme` as `ResolvedTheme` — it was `any` — and
-now supplies it from `themes.currentTokens()`. That extends the same protection
-one hop further back: the mounts that read tokens *off the plugin context* to
-build a slot input (item 13) are now checked where they read, not only
-where the result lands in a `SlotMap` entry. A token this fork hands to a slot
-can no longer quietly become `undefined` because upstream moved it.
+`context.theme` is typed as `ResolvedTheme`, supplied from
+`themes.currentTokens()`. That extends the same protection one hop further back:
+the mounts that read tokens *off the plugin context* to build a slot input
+(item 13) are checked where they read, not only where the result lands in a
+`SlotMap` entry. A token this fork hands to a slot cannot quietly become
+`undefined` because upstream moved it.
 
 ## The slot-presence gate
 
@@ -134,16 +133,15 @@ verbatim and merges re-anchor cleanly.
 
 ### Prompt row
 
-Upstream has since moved the row's right-hand content — the subagent/shell
-counts, the context and cost reading, and the agents/commands hints — out of
-`component/prompt/index.tsx` and into a built-in feature plugin,
+The row's right-hand content — the subagent/shell counts, the context and cost
+reading, and the agents/commands hints — lives in a built-in feature plugin,
 `packages/tui/src/feature-plugins/prompt/footer.tsx`, mounted on upstream's own
-`prompt.footer.end` slot with `mode="replace"`. The Prompt still owns the row
-itself and the location label; everything past them is that plugin's.
+`prompt.footer.end` slot with `mode="replace"`. The Prompt owns the row itself
+and the location label; everything past them is that plugin's.
 
-This split the fork's prompt-row entries in two. Items 1 and 18 stayed in the
+That split the fork's prompt-row entries in two. Items 1 and 18 live in the
 Prompt, because they bracket the whole row. Items 12 (`prompt.palette`) and 13
-moved into the feature plugin, because the content they modify moved there. That
+live in the feature plugin, because the content they modify does. That
 is also why `PromptFooter` reaches for `useConfigOptional()` and
 `useOptionalPlugin()` rather than the throwing variants: upstream renders it
 directly in `test/feature-plugins/prompt-footer.test.tsx` with no provider tree,
@@ -234,21 +232,19 @@ route's `Prompt` element. That element no longer carries a `right=` prop
 TPS/AVG/TTFT area), next to the `props.right` render, with `{ sessionID? }`
 input. Mounted inside the `Prompt` component, not in the session route.
 
-**Why:** This position used to be the legacy `session_prompt_right` slot, which
-the V2 plugin runtime could not reach — the legacy `TuiPluginRuntime` was never
-initialized by the v2 CLI, so nothing could register into it. Upstream has since
-deleted that runtime and every legacy mount, including the session route's
-`right=` prop, so the position now exists *only* through this entry.
+**Why:** Nothing upstream exposes this position any more. It was the legacy
+`session_prompt_right` slot, and that runtime is gone along with every legacy
+mount, so the position exists *only* through this entry.
 
 **Invariant:** exposes the `right` cluster position through the V2 registry.
 
 **Rebase:** trivial mount inside the `Prompt` component. `PromptProps.right`
-itself survives upstream but no route passes it any more, so the cluster is empty
-without a plugin.
+survives upstream but no route passes it, so the cluster is empty without a
+plugin.
 
-**Note:** no plugin in the suite registers this slot yet. It is the cheapest
-entry to drop if the fork is ever trimmed to what is actually consumed — more so
-now that nothing upstream renders beside it.
+**Note:** no plugin in the suite registers this slot. It is the cheapest entry
+to drop if the fork is ever trimmed to what is actually consumed — more so given
+nothing upstream renders beside it.
 
 #### 13. `session.prompt.context` replacement slot
 
@@ -339,12 +335,9 @@ Supporting pieces, live only in steering mode:
 - The arrow-bound `session.parent` command falls through when the focused
   editor has text — without this it shadows the app-level textarea layer
   (later-registered layers win keymap ties) and steals cursor keys from the
-  steering input. This guard used to cover `session.child.next/previous` as
-  well; upstream has since deleted both, along with their `left`/`right`
-  keybinds, as unimplemented stubs. That removes two thirds of what the guard
-  defended against, and it frees the horizontal arrows for the plugin's own
-  keymap layer — but `session.parent` still binds `up`, so the fallthrough
-  stays load-bearing. Do not restore the deleted commands to carry the guard.
+  steering input. It is the only core command needing the guard: it binds `up`,
+  while the horizontal arrows carry no core binding and are the plugin's own
+  keymap layer to claim.
 - `session.child.first` can still open the Composer manually in a child view
   (e.g. for the shell tab). While open it is upstream's interactive composer,
   Prompt hidden — including the subagents tab's escape action navigating to
@@ -452,7 +445,7 @@ with both wrapped in an ungapped box inside the footer's `gap={1}` container so
 a contribution reads as another line of the same block as the built-in working
 directory rather than a separate section. Slot input is a stable object with
 reactive getters: `{ sessionID, theme }`, where `theme` exposes `text`,
-`textSubdued`, and `accent` from the sidebar's own `contextual("elevated")`
+`textSubdued`, and `accent` from the sidebar's own `useTheme("elevated")`
 tokens, so a contribution matches the surface it sits on.
 
 **Why:** `sidebar.footer` already exists, but slot order is plugin registration
@@ -471,26 +464,10 @@ giving the built-in footer plugin knowledge of what wants to sit above it.
 `sidebar.footer` mount in an extra ungapped box. If upstream restructures that
 footer, re-derive from the invariant.
 
-#### 20. `home.footer.directory.trailing` slot — **dropped**
-
-Retired rather than re-derived. The slot mounted inline between the home
-footer's working directory and its MCP indicator, so a `git-branch`
-contribution read as a continuation of the path. Upstream then deleted the
-working directory from that row outright (narrow-layout rework), leaving the
-row as MCP + spacer + version — there is no directory left to trail, so the
-entry's invariant became unsatisfiable rather than merely relocated.
-
-What makes this a drop instead of a re-anchor: upstream now renders the branch
-itself, as `directory:branch`, in the Prompt's `locationLabel` (which is what
-the home route shows when there is no session yet) and in the built-in sidebar
-footer, reading it from a new `data.location.vcs` on the plugin context. The
-consumer's reason to exist on the home route is gone with it.
-
-Item 19 (`sidebar.footer.leading`) is deliberately kept. Its anchor still
-exists, its mount still applies cleanly, and it is a generic "line above the
-sidebar path" seam rather than a branch-specific one — even though upstream's
-native branch display makes the `git-branch` plugin's sidebar contribution
-redundant too.
+**Note:** no plugin in the suite registers this slot. The built-in footer now
+renders `directory:branch` itself, which is what a contribution here would most
+naturally have added. Like item 2, this is a cheap entry to drop if the fork is
+trimmed to what is actually consumed.
 
 ### Session-wide gates
 
@@ -503,9 +480,9 @@ redundant too.
 the pattern of items 4 and 9.
 
 - `app.bottom` itself: a full-width row mounted below every route in `app.tsx`,
-  above upstream's own `app` slot. This *was* upstream's, and the gate below was
-  all this entry owned; upstream has since pruned its slot vocabulary and deleted
-  it, so the fork now carries the mount as well. One plugin uses it:
+  above upstream's own `app` slot. The name is the fork's — upstream has no
+  `app.bottom` — so this entry owns both the mount and the gate. One plugin uses
+  it:
   `provider-usage` mounts its `/usage` output there — a status line while
   refreshing, then the per-window detail table, cleared after fifteen seconds.
   Its persistent usage bars are *not* here; those are item 1's slot, inside the
@@ -522,11 +499,9 @@ the pattern of items 4 and 9.
   session route). While at least one active plugin registers this slot, every
   input surface — upstream's `session.composer.top` mount, the Composer, and the
   Prompt — is gated off so the transcript scrollbox reclaims the full height,
-  turning the session into a read-only output view. (That first surface is a
-  round trip: upstream deleted the slot, then reinstated it, so the "composer
-  trio" is once again three. Whether it is two or three is upstream's call —
-  what this entry owns is that *every* input surface in the cluster is inside
-  the gate.) The wrapping `<box flexShrink={0}>` is itself dropped
+  turning the session into a read-only output view. How many surfaces the cluster
+  has is upstream's call and has changed before; what this entry owns is that
+  *every* one of them is inside the gate. The wrapping `<box flexShrink={0}>` is itself dropped
   while hidden — an empty box would still be a flex child, so the parent's
   `gap={1}` would leave a blank row above the `paddingBottom` one — and
   `paddingBottom` collapses to `0`, leaving exactly one blank row below the
@@ -582,28 +557,28 @@ Items 5, 6, and 7 center on one new provider file
 new fields on the V2 plugin context type
 (`packages/plugin/src/tui/context.ts`, `packages/tui/src/plugin/api.tsx`).
 
-**The context literal is no longer in `plugin/context.tsx`.** Upstream split
-that file: `plugin/api.tsx` now owns both `usePluginHost()` — one object
-collecting every host hook, since hooks must run during component setup — and
-`createPluginContext()`, which adapts them into the object a plugin receives.
-`plugin/context.tsx` keeps only the provider, the registration store, and the
-reconcile/hot-reload lifecycle. Every fork field these three entries add
-(`terminal`, `clipboard`, the `attention` wrapper) therefore lives in
-`api.tsx`, reached as `host.<service>` with disposal pushed onto `input.owned`
-rather than a closure-scoped `owned`. Adding a hook now means two edits — the
-`usePluginHost` literal and the context literal — instead of one.
+**The context literal lives in `plugin/api.tsx`, not `plugin/context.tsx`.**
+`api.tsx` owns both `usePluginHost()` — one object collecting every host hook,
+since hooks must run during component setup — and `createPluginContext()`, which
+adapts them into the object a plugin receives. `plugin/context.tsx` keeps only
+the provider, the registration store, and the reconcile/hot-reload lifecycle.
+Every fork field these three entries add (`terminal`, `clipboard`, the
+`attention` wrapper) therefore lives in `api.tsx`, reached as `host.<service>`
+with disposal pushed onto `input.owned` rather than a closure-scoped `owned`.
+Adding a hook means two edits: the `usePluginHost` literal and the context
+literal.
 
-`PluginRoute` and `PluginSlot` moved out too, into `plugin/render.tsx`. Every
-fork mount imports the component from there and the hooks from
-`plugin/context`, which is why several files now import from both.
+`PluginRoute` and `PluginSlot` live in `plugin/render.tsx`. Every fork mount
+imports the component from there and the hooks from `plugin/context`, which is
+why several files import from both.
 
-Note the plugin package's paths moved: upstream promoted `packages/plugin/src/v2/**`
-to `packages/plugin/src/**` and demoted the old V1 API to `packages/plugin/src/v1/**`.
-The import that catches this is `@opencode-ai/plugin/tui`, which now resolves to
-the *V2* TUI module — V1's types (`TuiAttention*`, `TuiThemeCurrent`) live at
-`@opencode-ai/plugin/v1/tui`. Fork files reaching for a V1 type through the old
-specifier fail to compile rather than resolving to something plausible, which is
-the good case; the bad case would have been a name that exists in both.
+Note where the plugin package's paths sit: the V2 API is `packages/plugin/src/**`
+and V1 is `packages/plugin/src/v1/**`. The import that catches this is
+`@opencode-ai/plugin/tui`, which resolves to the *V2* TUI module — V1's types
+(`TuiAttention*`, `TuiThemeCurrent`) live at `@opencode-ai/plugin/v1/tui`. Fork
+files reaching for a V1 type through the V2 specifier fail to compile rather than
+resolving to something plausible, which is the good case; the bad case would have
+been a name that exists in both.
 
 #### 5. `context.terminal` focus API (V2 TUI plugins)
 
@@ -640,14 +615,13 @@ fork content is a single wrapper.
 **What:** Two APIs, one on the plugin context type and one on the
 `TerminalProvider` wiring:
 
-- `context.attention.soundboard`. **Upstream has since shipped the attention
-  host itself** — `packages/tui/src/context/attention.tsx` instantiates
-  `createTuiAttention`, and `context.attention.notify` is upstream's — so all
-  this entry still adds is the sound-pack registry, which upstream's `Attention`
-  interface omits even though the object behind it has one. The fork widens that
-  interface with `soundboard` and wraps the host in `plugin/context.tsx` rather
-  than passing it through, so a registered pack is unregistered when the owning
-  plugin unloads. `attention-notifications` calls
+- `context.attention.soundboard`. **Upstream owns the attention host** —
+  `packages/tui/src/context/attention.tsx` instantiates `createTuiAttention`, and
+  `context.attention.notify` is upstream's — so all this entry adds is the
+  sound-pack registry, which upstream's `Attention` interface omits even though
+  the object behind it has one. The fork widens that interface with `soundboard`
+  and wraps the host in `plugin/api.tsx` rather than passing it through, so a
+  registered pack is unregistered when the owning plugin unloads. `attention-notifications` calls
   `context.attention.soundboard.activate(...)`, so dropping it would break that
   plugin. Note: `attention.enabled` defaults to `false` upstream, so sounds
   require opting in via `cli.json`.
@@ -662,14 +636,11 @@ fork content is a single wrapper.
   app's "title disabled" clear) passes through raw, so decorations cannot
   resurrect a title the app removed.
 
-**Why:** In the v2 binary the legacy TUI plugin runtime (which exposed
-`api.attention` and raw renderer access) was dead code — the v2 CLI never
-initialized it, so the v2 TUI shipped with no notification sounds at all and
-no safe way for plugins to touch the terminal title. Upstream has since answered
-the first half; the second is still only here. Raw
-`renderer.setTerminalTitle()` writes from plugins would race the app's own
-reactive title effect; the decoration registry removes that race by
-construction.
+**Why:** Upstream gives plugins notifications but no safe way to touch the
+terminal title. Raw `renderer.setTerminalTitle()` writes from plugins would race
+the app's own reactive title effect; the decoration registry removes that race by
+construction. (The sound side is nearly upstream's now — see the soundboard note
+above for the sliver this entry still carries.)
 
 **Invariant:** `app.tsx`'s title effect stays **byte-for-byte upstream** —
 decorations are applied by wrapping `setTerminalTitle` inside `TerminalProvider`,
@@ -826,20 +797,19 @@ renders.
 **Rebase:** two optional fields appended to the `prompt` struct in the TUI config
 schema, an early-return line at the top of the `locationLabel` memo, and a term
 on the `<Show>` around the palette-hint `<text>` in the feature plugin's
-normal-mode branch. That `<Show>` is now upstream's — it added a narrow-terminal
-gate (`dimensions().width >= 44`) where the fork previously introduced the
-wrapper — so the fork contributes `&& config?.data.prompt?.palette !== false`
-rather than the whole element. Keep both terms: dropping upstream's re-shows the
-hint on narrow terminals, dropping the fork's makes the config option dead.
+normal-mode branch. That `<Show>` is upstream's, carrying a narrow-terminal gate
+(`dimensions().width >= 44`); the fork contributes
+`&& config?.data.prompt?.palette !== false` rather than the whole element. Keep
+both terms: dropping upstream's re-shows the hint on narrow terminals, dropping
+the fork's makes the config option dead.
 
 The `?.` is load-bearing: that component reads config through
 `useConfigOptional()` so it still renders in upstream's provider-less test, and
-an absent provider has to mean "upstream behavior", not "hidden". **That hook is
-now the fork's own** — upstream exported it, then removed it, so this entry
-carries a four-line addition to `config/index.tsx` beside `useConfig`. Its
-counterpart `useOptionalPlugin` (in `plugin/context.tsx`) has always been the
-fork's. If either disappears again, the failure is a compile error in the
-built-in prompt footer, not a behavior change.
+an absent provider has to mean "upstream behavior", not "hidden". **Both optional
+hooks are the fork's own** — `useConfigOptional` in `config/index.tsx` beside
+`useConfig`, and `useOptionalPlugin` in `plugin/context.tsx` — four lines each.
+If either goes missing the failure is a compile error in the built-in prompt
+footer, not a behavior change.
 
 ## Upstream fixes
 
@@ -1274,10 +1244,10 @@ completes, because nothing else writes `usage`.
 the existing `stepModel` writes in the same three branches (started, ended,
 failed), so they widen existing hunks rather than adding new ones; in
 `footer.view.tsx` the JSX swap replaces the statusline's usage text with a
-component and moves the mono separator into it. Upstream has since rebuilt that
-row around a measured layout (`footerStatuslinePolicy`), which renders the
-reading through a `<Show>` render-prop — the swap now goes inside that, and
-`activityMeta` stays the raw joined string so `ContextUsage` can split it. `splitUsage` splits on the `" · "` the
+component and moves the mono separator into it. That row is a measured layout
+(`footerStatuslinePolicy`) rendering the reading through a `<Show>` render-prop,
+so the swap goes inside that, and `activityMeta` stays the raw joined string so
+`ContextUsage` can split it. `splitUsage` splits on the `" · "` the
 transport joins with — if upstream changes that separator this degrades to
 colouring the whole reading, which over-colours rather than breaking.
 `test/mini/context-cache.test.tsx` is the guard and asserts real span colours
@@ -1345,15 +1315,13 @@ pointer so a linked worktree or submodule reports its own branch. A detached
 checkout shows an abbreviated sha. Mono spells the marker out (`on main`)
 because the branch glyph is outside ASCII.
 
-**Why:** The `git-branch` plugin's slot (`sidebar.footer.leading` — it also had
-`home.footer.directory.trailing` until item 20 was dropped) names a surface mini
-does not have, and mini has no plugin host to mount it in. The splash is where
-mini already answers
-"where am I", so the branch belongs beside the directory and costs no
-statusline width. Registering a `/branch` *command* was considered and
-rejected: a command is a prompt template, so invoking it would cost a model
-turn to print something two syscalls away, and mini's shell mode (`!`) already
-covers the on-demand case.
+**Why:** The full TUI shows the branch as `directory:branch` in the prompt
+location label and the sidebar footer; mini has neither surface, and no plugin
+host to mount one in. The splash is where mini already answers "where am I", so
+the branch belongs beside the directory and costs no statusline width.
+Registering a `/branch` *command* was considered and rejected: a command is a
+prompt template, so invoking it would cost a model turn to print something two
+syscalls away, and mini's shell mode (`!`) already covers the on-demand case.
 
 **Invariant:** the branch renders only alongside the directory, since it is
 positioned relative to that row. The splash is a scrollback snapshot —
@@ -1368,8 +1336,8 @@ entry branch gains one `push` and a body-row count that replaces the inline
 upstream reworks splash layout; re-derive from the invariant. The lifecycle
 passes `branch:` at both `entrySplash` call sites (startup and replay reset).
 
-**Drop when:** mini grows a plugin host that the `git-branch` plugin can
-target, or upstream puts the branch on the splash itself.
+**Drop when:** upstream puts the branch on the mini splash itself, or gives mini
+the location label the full TUI already resolves a branch into.
 
 #### 26. Provider subscription usage in mini
 
@@ -1588,7 +1556,7 @@ Every failure — absent setting, unknown name, unreadable file, a color referen
 than surfacing. A theme typo must not stop mini from starting, and the default
 path must stay reachable without config changes.
 
-**Limitation:** only version-1 theme documents resolve. Upstream has since added
+**Limitation:** only version-1 theme documents resolve. Upstream also ships
 natively authored v2 themes, and mini reaches colors through the v1 path
 (`mini/theme.ts`'s `resolveTheme` reads a `ThemeV1Json`, and `map` wants that
 flat shape), so a discovered v2 file is filtered out and falls back rather than
@@ -1777,9 +1745,6 @@ fork(docs)     FORK.md                            amended, not rewritten
 fork(rebase)   —                                  re-derivations, when needed
 ```
 
-Entry 20 was here until upstream deleted its anchor; the gap in the mounts batch
-is the record of that, and the numbering rule means nothing renumbers around it.
-
 `fork(rebase)` is the exception to one-commit-per-entry: when upstream moves code
 out from under several entries at once, the fixes land together at the tip rather
 than being amended into each entry's commit, because amending mid-stack
@@ -1840,24 +1805,22 @@ condition edited inside upstream's own expression.
 
 ### Known upstream collisions
 
-- **Upstream's slot vocabulary is not stable, in either direction.** It has both
-  added names (`prompt.footer.end`) and deleted them (`app.bottom`,
-  `home.bottom`, `session.header`), and it has un-deleted one:
-  `session.composer.top` came back after being removed. A deleted name that this
-  fork mounts or gates becomes the fork's to carry — that is how item 10 acquired
-  the `app.bottom` mount. Now that `SlotMap` is typed, a name upstream removes
-  fails to compile rather than silently rendering nothing. A name that *returns*
-  is the quieter direction: nothing fails, the fork simply stops gating a surface
-  it used to (item 10's composer trio), so re-read that entry's invariant rather
-  than trusting a clean apply.
+- **Upstream's slot vocabulary is not stable, in either direction** — names get
+  added, deleted, and occasionally reinstated. A deleted name that this fork
+  mounts or gates becomes the fork's to carry; that is how item 10 owns the
+  `app.bottom` mount. Now that `SlotMap` is typed, a removal fails to compile
+  rather than silently rendering nothing. A name *returning* is the quieter
+  direction: nothing fails, the fork simply stops gating a surface it should
+  gate, so entries that gate a *set* of surfaces (item 10) need their invariant
+  re-read rather than a clean apply trusted.
 - **An entry's anchor can be deleted rather than moved, and then it is a drop
-  decision, not a merge.** Upstream removed the working directory from the home
-  footer, which left item 20's slot with nothing to be "trailing" of — and in the
-  same window shipped `directory:branch` natively in the Prompt label and sidebar
-  footer, covering the consumer plugin. The entry was retired. The signal to look
-  for: an invariant that no longer *can* hold, plus upstream having absorbed the
-  feature. Contrast items 12 and 13, whose anchors moved into a feature plugin and
-  survived intact.
+  decision, not a merge.** The signal is an invariant that no longer *can* hold —
+  a slot positioned relative to something upstream no longer renders — usually
+  paired with upstream having absorbed the feature the consumer plugin provided.
+  Retire the entry rather than re-anchoring it somewhere its documented position
+  no longer describes. Contrast items 12 and 13, whose anchors moved into a
+  feature plugin and survived intact: a move is a merge, a deletion is a
+  decision.
 - `packages/client/src/**` is generated. After rebasing items 8 or 33, rerun
   `bun run generate` in `packages/client` rather than resolving conflicts by
   hand — `git checkout --ours` those paths first, then regenerate, then `git add`.
