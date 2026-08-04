@@ -63,6 +63,7 @@ Upstream fixes:
 - [17 — selection copy blank rows](#17-selection-copy-preserves-blank-layout-rows)
 - [33 — unsending a queued prompt](#33-unsending-a-queued-prompt-before-the-model-sees-it)
 - [34 — audio device opened once](#34-a-failed-audio-device-is-opened-once-not-once-per-sound)
+- [35 — directory plugin entrypoints](#35-a-directory-plugins-entrypoint-resolves-to-a-real-file)
 - [22 — steering a subagent from mini](#22-steering-a-running-subagent-from-the-mini-inspector)
 - [23 — prompt-cache staleness in mini](#23-prompt-cache-staleness-in-the-mini-statusline)
 - [24 — attention alerts in mini](#24-attention-alerts-in-mini)
@@ -1099,6 +1100,59 @@ twice after a failure.
 **Drop when:** upstream memoizes the failed start itself, or OpenTUI silences
 the native backend's own writes to fd 2.
 
+#### 35. A directory plugin's entrypoint resolves to a real file
+
+**Files:** `packages/tui/src/plugin/context.tsx`,
+`packages/tui/src/plugin/discovery.ts`
+
+**What:** `resolveLocal` probes the filesystem for a directory plugin's
+entrypoint — `<dir>/tui.<ext>`, then `<dir>/tui/index.<ext>` — instead of
+handing back `import.meta.resolve("<dir>/tui")`. The extension list moves to an
+ordered exported `entrypointExtensions` in `discovery.ts` (TypeScript first),
+with that file's existing membership `Set` derived from it so discovery is
+unchanged. A directory with no TUI half now resolves to `undefined`, which the
+caller already reports as `unsupported`.
+
+**Why:** `import.meta.resolve` is a **no-op on an absolute `file://` URL**: it
+neither probes extensions nor checks existence, so it returned
+`file:///…/plugin/tui` — a specifier only the module loader can resolve, by
+probing extensions itself at import time. That was harmless while the result fed
+straight into `import()`. Upstream then added plugin hot-reload, which reads the
+entrypoint's mtime to cache-bust the ESM cache:
+
+```js
+const version = local ? freshSpecifier(entrypoint, (await stat(new URL(entrypoint))).mtimeMs) : entrypoint
+```
+
+`stat` does no extension probing, so every directory-style local plugin fails to
+load with `ENOENT … statx '…/plugin/tui'` while `import()` on that same
+specifier succeeds. Upstream supports the directory form — `localSource` accepts
+absolute and `./` paths — but its own discovery only ever yields *files* from
+`<config>/plugins/tui/`, so nothing upstream exercises it. Every plugin in this
+fork's suite is directory-style, so all of them broke at once.
+
+The failure is per-plugin rather than fatal (`reconcile` records it as `failed`
+and the TUI starts without it), which is why it reads as "my plugins vanished"
+rather than a crash.
+
+**Invariant:** a resolved local entrypoint is a path, not just a specifier —
+anything `resolveLocal` returns can be `stat`ed as well as imported. Preserve
+that rather than the probing order, and note the *absence* of an entrypoint must
+stay `undefined` (→ `unsupported`), since pointing at a server-only plugin
+directory is normal and is not a broken plugin.
+
+**Rebase:** contained to `resolveLocal` plus the extension-list export. The
+`export` on `resolveLocal` itself exists only for the test. If upstream reworks
+local resolution, check the invariant rather than replaying the diff — and note
+the bug is invisible to a suite that only uses file entrypoints, which is why
+the guard builds directory fixtures.
+`packages/tui/test/plugin-entrypoint.test.ts` is that guard (a new file, no
+conflict surface); four of its five cases fail against upstream's version.
+
+**Drop when:** upstream resolves a directory plugin to a real file — or stops
+needing the entrypoint as a path, which would mean giving up mtime-based
+hot reload.
+
 ### Mini
 
 The entries in this section target `opencode mini`, and they are native code
@@ -1718,6 +1772,7 @@ fork(31)       31                                 two imports + one statement
 fork(32)       32                                 new file + two call sites
 fork(33)       33        three commits: core/protocol, the keyed Show, the TUI
 fork(34)       34                                 one flag in a small file
+fork(35)       35                                 one function + a list export
 fork(docs)     FORK.md                            amended, not rewritten
 fork(rebase)   —                                  re-derivations, when needed
 ```
@@ -1876,8 +1931,11 @@ condition edited inside upstream's own expression.
   `packages/core/test/plugin.test.ts`.
 - TUI: `packages/tui/test/util/selection.test.ts` and
   `packages/tui/test/util/session.test.ts` (items 7 and 13), plus item 17's
-  `selection-text.test.ts` and `selection-text.render.test.ts`, and item 33's
-  `test/session/unqueue.test.ts`.
+  `selection-text.test.ts` and `selection-text.render.test.ts`, item 33's
+  `test/session/unqueue.test.ts`, and item 35's
+  `test/plugin-entrypoint.test.ts` — the last of which is the only guard that
+  builds *directory* plugin fixtures, the shape upstream's own plugin tests
+  never use and the reason its bug went unnoticed.
 - **Upstream tests that fork entries must keep passing**, which is a different
   obligation from the fork's own guards:
   `packages/tui/test/feature-plugins/prompt-footer.test.tsx` renders the built-in
