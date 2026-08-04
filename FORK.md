@@ -62,6 +62,7 @@ Upstream fixes:
 - [16 — catalog-aware session restore](#16-session-agentmodel-restore-waits-for-the-catalog)
 - [17 — selection copy blank rows](#17-selection-copy-preserves-blank-layout-rows)
 - [33 — unsending a queued prompt](#33-unsending-a-queued-prompt-before-the-model-sees-it)
+- [34 — audio device opened once](#34-a-failed-audio-device-is-opened-once-not-once-per-sound)
 - [22 — steering a subagent from mini](#22-steering-a-running-subagent-from-the-mini-inspector)
 - [23 — prompt-cache staleness in mini](#23-prompt-cache-staleness-in-the-mini-statusline)
 - [24 — attention alerts in mini](#24-attention-alerts-in-mini)
@@ -1023,6 +1024,45 @@ can go the moment upstream keys it, independently of the rest.
 **Note:** mini is untouched. It has no plugin host and sends mid-turn prompts
 as `queue` delivery, so its "Pending work" panel (read-only today) is where the
 same capability would land — a longer cancel window and almost no race.
+
+#### 34. A failed audio device is opened once, not once per sound
+
+**Files:** `packages/tui/src/audio.ts`
+
+**What:** `play()` remembers that `Audio.start()` failed and stops calling it,
+the way `getAudio()` already remembers that `Audio.create()` threw. The flag
+clears in `dispose()` beside `audio` and the sound cache.
+
+**Why:** Everything in JS already handles a missing playback device in silence
+— `play()` returns null, `attention.ts`'s `playSound` falls through its
+candidate list, and `notify` reports `{ ok: false, sound: false }`. The failure
+is not silent below JS. Opening the device is native code, and on a host with
+no usable card the backend writes its diagnostics straight to fd 2. That path
+bypasses the renderer's console capture — the full TUI leaves `consoleMode` at
+OpenTUI's `console-overlay` default, which only rebinds the JS `console`
+methods — so the lines land on the alternate screen as raw text, and because
+the renderer diffs frames, cells it believes are unchanged are never repainted
+and the damage stays until a resize. Upstream sets `playbackStarted` only on
+success while `play()` calls `start()` whenever `isStarted()` is false, so
+every later notification reopened the device and repainted the mess; that is
+what turns one burst into a covered screen. Reproduced under a stubbed-out ALSA
+config: seven lines per attempt, more against a stock `alsa.conf`. Memoizing
+does not suppress the *first* burst — nothing reachable from JS can, short of
+redirecting fd 2 around the call, which is a platform-specific hack this file
+does not otherwise need.
+
+**Invariant:** the playback device is opened at most once per process. The cost
+is that hardware appearing mid-session — headphones plugged in after the first
+sound — stays unused until restart. Accepted: the alternative is a burst of
+screen damage per notification for a device that is usually still missing.
+
+**Rebase:** one flag and one widened branch in a small file upstream rarely
+touches. If `play()` has been restructured, re-derive from the invariant rather
+than replaying the diff; the shape matters less than never calling `start()`
+twice after a failure.
+
+**Drop when:** upstream memoizes the failed start itself, or OpenTUI silences
+the native backend's own writes to fd 2.
 
 ### Mini
 
