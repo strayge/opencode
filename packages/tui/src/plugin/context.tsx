@@ -13,7 +13,8 @@ import { errorMessage } from "../util/error"
 import { builtins } from "./builtins"
 import { createPluginContext, usePluginHost, type Dispose } from "./api"
 import { createSourceWatcher } from "./watch"
-import { discoverTuiPlugins, freshSpecifier, localSource } from "./discovery"
+import { discoverTuiPlugins, entrypointExtensions, freshSpecifier, localSource } from "./discovery"
+import { isMissingPath } from "../util/config-directories"
 
 export interface PackageResolver {
   readonly resolve: (spec: string) => Promise<string | undefined>
@@ -486,19 +487,33 @@ function sameOptions(a: Registration["options"], b: Registration["options"]) {
   return isDeepEqual(a ?? null, b ?? null)
 }
 
-async function resolveLocal(url: URL) {
+export async function resolveLocal(url: URL) {
   const info = await stat(url)
   if (info.isFile()) return url.href
   if (!info.isDirectory()) return
-  return resolve(pathToFileURL(path.join(fileURLToPath(url), "tui")).href)
+  // A directory entrypoint is <dir>/tui, and the extension has to be found here
+  // rather than left to the loader. `import.meta.resolve` is a no-op on an
+  // absolute file URL — it neither probes extensions nor checks existence — so
+  // it yields a specifier that only `import()` can resolve, and every caller
+  // treating that as a path (the hot-reload mtime read) fails on it. Returning a
+  // real file keeps both readings valid.
+  const base = path.join(fileURLToPath(url), "tui")
+  for (const extension of entrypointExtensions) {
+    for (const candidate of [base + extension, path.join(base, `index${extension}`)]) {
+      if (await isFile(candidate)) return pathToFileURL(candidate).href
+    }
+  }
+  // No entrypoint is "unsupported", not "failed": a plugin directory with only a
+  // server half is a normal thing to point at, and it should not be reported as
+  // broken.
+  return undefined
 }
 
-function resolve(specifier: string) {
-  try {
-    return import.meta.resolve(specifier)
-  } catch {
-    return undefined
-  }
+function isFile(target: string) {
+  return stat(target).then(
+    (info) => info.isFile(),
+    (error: unknown) => (isMissingPath(error) ? false : Promise.reject(error)),
+  )
 }
 
 function isPlugin(value: unknown): value is Plugin.Definition {

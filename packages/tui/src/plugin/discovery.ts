@@ -7,7 +7,13 @@ import {
   projectConfigDirectories,
 } from "../util/config-directories"
 
-const extensions = new Set([".cjs", ".cts", ".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"])
+// Ordered by resolution priority rather than alphabetically: an extensionless
+// directory entrypoint probes these in turn, TypeScript first, so a source tree
+// shipping both `tui.ts` and a built `tui.js` resolves to the same file the
+// module loader would have picked.
+export const entrypointExtensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]
+
+const extensions = new Set(entrypointExtensions)
 
 export async function tuiPluginDirectories(cwd: string, configDirectory: string) {
   const projectDirectory = await localProjectDirectory(cwd)
