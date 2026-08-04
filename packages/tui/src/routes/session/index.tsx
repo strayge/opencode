@@ -80,7 +80,7 @@ import { nextThinkingMode, reasoningSummary, type ThinkingMode } from "../../con
 import { getScrollAcceleration } from "../../util/scroll"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
-import { PluginSlot, usePlugin } from "../../plugin/context"
+import { usePlugin } from "../../plugin/context"
 import { assistantFooterSlotInput } from "../../plugin/slot-inputs"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"

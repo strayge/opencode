@@ -57,8 +57,9 @@ export function namedThemeSelection(config: ThemeConfig): string | undefined {
 }
 
 async function discoverCustomThemes(): Promise<Record<string, ThemeV1Json>> {
-  const [discovery, global, registry] = await Promise.all([
+  const [discovery, directories, global, registry] = await Promise.all([
     import("../theme/discovery"),
+    import("../util/config-directories"),
     import("@opencode-ai/util/global"),
     import("../theme"),
   ])
@@ -67,7 +68,7 @@ async function discoverCustomThemes(): Promise<Record<string, ThemeV1Json>> {
   // compiled-in Global.Path.config ignores it, so reading that alone would miss
   // every theme belonging to a relocated install.
   const directory = process.env.OPENCODE_CONFIG_DIR ?? global.Global.Path.config
-  const discovered = await discovery.discoverThemes(discovery.themeDirectories(directory, process.cwd()))
+  const discovered = await discovery.discoverThemes(directories.configDirectories(directory, process.cwd()))
   const result: Record<string, ThemeV1Json> = {}
   for (const [name, theme] of Object.entries(discovered)) {
     if (!registry.isThemeSource(theme)) continue

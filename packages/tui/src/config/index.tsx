@@ -275,3 +275,13 @@ export function useConfig() {
   if (!value) throw new Error("ConfigProvider is missing")
   return value
 }
+
+/**
+ * Reads the config without requiring a provider, so a built-in feature plugin
+ * can consult it while still rendering standalone in a test. With no provider
+ * there is no config to read, which has to mean upstream behavior rather than a
+ * suppressed element.
+ */
+export function useConfigOptional() {
+  return useContext(ConfigContext)
+}

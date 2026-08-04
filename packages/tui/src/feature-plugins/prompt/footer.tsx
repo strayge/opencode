@@ -1,7 +1,8 @@
 import { Plugin } from "@opencode-ai/plugin/tui"
 import { createMemo, Match, Show, Switch } from "solid-js"
 import { useConfigOptional } from "../../config"
-import { PluginSlot, useOptionalPlugin } from "../../plugin/context"
+import { useOptionalPlugin } from "../../plugin/context"
+import { PluginSlot } from "../../plugin/render"
 import { contextUsage, formatContextUsage } from "../../util/session"
 import { useTerminalDimensions } from "@opentui/solid"
 

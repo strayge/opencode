@@ -28,7 +28,10 @@ export function contextUsage(
   return {
     tokens,
     percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : undefined,
-    updatedAt: last.time.created,
+    // Optional despite the schema: callers hand this synthesized messages that
+    // carry usage without a timestamp, and a missing one only costs staleness
+    // styling downstream.
+    updatedAt: last.time?.created,
   }
 }
 
